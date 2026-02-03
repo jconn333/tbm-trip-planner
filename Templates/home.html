@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+
+{% block title %}TBM Trip Planner{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+  <h1 class="text-3xl font-semibold mb-2">TBM Trip Planner</h1>
+  <p class="text-slate-400 mb-8">
+    Airline-style trip planning with winds aloft and TBM operating cost assumptions.
+  </p>
+
+  <form method="post" action="/start" class="space-y-6" id="tripForm">
+    <!-- Trip type -->
+    <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+      <div class="text-sm font-medium mb-3">Trip type</div>
+      <div class="flex gap-3">
+        <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-800 bg-slate-900/40 cursor-pointer">
+          <input type="radio" name="trip_type" value="oneway" checked class="h-4 w-4" />
+          <span class="text-sm">One-way</span>
+        </label>
+        <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-800 bg-slate-900/40 cursor-pointer">
+          <input type="radio" name="trip_type" value="roundtrip" class="h-4 w-4" />
+          <span class="text-sm">Round trip</span>
+        </label>
+      </div>
+      <p class="text-xs text-slate-500 mt-2">
+        Round trip will estimate both legs and show a total + per-leg breakdown.
+      </p>
+    </div>
+
+    <!-- Airports -->
+    <div>
+      <label class="block text-sm font-medium mb-1">Departing from</label>
+
+      <!-- visible field (typeahead) -->
+      <input
+        id="dep_input"
+        name="dep_query"
+        placeholder="KCAK or Canton, OH"
+        autocomplete="off"
+        required
+        class="w-full rounded-lg bg-slate-900 border border-slate-700 px-4 py-3
+               focus:outline-none focus:ring-2 focus:ring-sky-500"
+      />
+
+      <!-- hidden selected ICAO -->
+      <input type="hidden" id="dep_icao" name="dep_icao" />
+      <div id="dep_dropdown" class="relative"></div>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1">Destination</label>
+
+      <!-- visible field (typeahead) -->
+      <input
+        id="dest_input"
+        name="dest_query"
+        placeholder="KDEN or Denver, CO"
+        autocomplete="off"
+        required
+        class="w-full rounded-lg bg-slate-900 border border-slate-700 px-4 py-3
+               focus:outline-none focus:ring-2 focus:ring-sky-500"
+      />
+
+      <!-- hidden selected ICAO -->
+      <input type="hidden" id="dest_icao" name="dest_icao" />
+      <div id="dest_dropdown" class="relative"></div>
+    </div>
+
+    <!-- Dates -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium mb-1">
+          Departure date <span class="text-slate-400">(optional)</span>
+        </label>
+
+        <input
+          type="date"
+          name="depart_dt"
+          id="depart_dt"
+          class="w-full rounded-lg bg-slate-900 border border-slate-700 px-4 py-3
+                 focus:outline-none focus:ring-2 focus:ring-sky-500"
+        />
+
+        <p class="text-xs text-slate-500 mt-1">
+          Used to choose 6 / 12 / 24 hr winds forecast bucket
+        </p>
+      </div>
+
+      <div id="return_wrap" class="hidden">
+        <label class="block text-sm font-medium mb-1">
+          Return date <span class="text-slate-400">(optional)</span>
+        </label>
+
+        <input
+          type="date"
+          name="return_dt"
+          id="return_dt"
+          class="w-full rounded-lg bg-slate-900 border border-slate-700 px-4 py-3
+                 focus:outline-none focus:ring-2 focus:ring-sky-500"
+        />
+
+        <p class="text-xs text-slate-500 mt-1">
+          Only used for round trip
+        </p>
+      </div>
+    </div>
+
+    <button type="submit"
+      class="w-full rounded-xl bg-sky-600 hover:bg-sky-500 transition font-semibold py-3 text-lg">
+      Get Estimate
+    </button>
+
+    <p class="text-xs text-slate-500 pt-2">
+      Planning estimate only (not for operational flight planning).
+    </p>
+  </form>
+</div>
+
+<script>
+  // -----------------------------
+  // Trip type toggle: show/hide return date
+  // -----------------------------
+  const returnWrap = document.getElementById("return_wrap");
+  const tripTypeRadios = document.querySelectorAll('input[name="trip_type"]');
+
+  function syncReturnVisibility() {
+    const type = document.querySelector('input[name="trip_type"]:checked')?.value || "oneway";
+    if (type === "roundtrip") {
+      returnWrap.classList.remove("hidden");
+    } else {
+      returnWrap.classList.add("hidden");
+      const ret = document.getElementById("return_dt");
+      if (ret) ret.value = "";
+    }
+  }
+  tripTypeRadios.forEach(r => r.addEventListener("change", syncReturnVisibility));
+  syncReturnVisibility();
+
+  // -----------------------------
+  // Date picker: click anywhere
+  // -----------------------------
+  function openNativePicker(inputEl) {
+    if (!inputEl) return;
+
+    // Chrome/Edge
+    if (typeof inputEl.showPicker === "function") {
+      inputEl.showPicker();
+      return;
+    }
+
+    // Safari fallback
+    inputEl.focus();
+    inputEl.click();
+  }
+
+  document.addEventListener("click", (e) => {
+    const dep = document.getElementById("depart_dt");
+    const ret = document.getElementById("return_dt");
+
+    if (dep && e.target === dep) openNativePicker(dep);
+    if (ret && e.target === ret) openNativePicker(ret);
+  });
+
+  // -----------------------------
+  // Typeahead: airports dropdown
+  // -----------------------------
+  async function fetchAirports(q) {
+    const url = `/api/airports?q=${encodeURIComponent(q)}`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    return await res.json();
+  }
+
+  function renderDropdown(container, items, onPick) {
+    container.innerHTML = "";
+
+    if (!items || items.length === 0) return;
+
+    const box = document.createElement("div");
+    box.className = "absolute z-20 mt-2 w-full rounded-xl border border-slate-800 bg-slate-950 shadow-lg overflow-hidden";
+
+    items.forEach((it) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "w-full text-left px-4 py-3 hover:bg-slate-900 transition text-sm";
+      btn.textContent = it.label;
+      btn.addEventListener("click", () => onPick(it));
+      box.appendChild(btn);
+    });
+
+    container.appendChild(box);
+  }
+
+  function setupTypeahead(inputId, hiddenId, dropdownId) {
+    const input = document.getElementById(inputId);
+    const hidden = document.getElementById(hiddenId);
+    const dropdown = document.getElementById(dropdownId);
+
+    let lastQ = "";
+    let timer = null;
+
+    input.addEventListener("input", () => {
+      const q = (input.value || "").trim();
+      hidden.value = ""; // clear selection if user edits
+      if (timer) clearTimeout(timer);
+
+      timer = setTimeout(async () => {
+        if (q.length < 2) {
+          dropdown.innerHTML = "";
+          return;
+        }
+        lastQ = q;
+        const items = await fetchAirports(q);
+        // avoid race
+        if (lastQ !== q) return;
+        renderDropdown(dropdown, items, (picked) => {
+          input.value = picked.label;
+          hidden.value = picked.icao;
+          dropdown.innerHTML = "";
+        });
+      }, 150);
+    });
+
+    // close dropdown on outside click
+    document.addEventListener("click", (e) => {
+      if (!dropdown.contains(e.target) && e.target !== input) {
+        dropdown.innerHTML = "";
+      }
+    });
+  }
+
+  setupTypeahead("dep_input", "dep_icao", "dep_dropdown");
+  setupTypeahead("dest_input", "dest_icao", "dest_dropdown");
+
+  // Require that a dropdown choice was actually selected (ICAO filled)
+  document.getElementById("tripForm").addEventListener("submit", (e) => {
+    const depIcao = (document.getElementById("dep_icao").value || "").trim();
+    const destIcao = (document.getElementById("dest_icao").value || "").trim();
+    if (!depIcao || !destIcao) {
+      e.preventDefault();
+      alert("Please select airports from the dropdown list so we have exact airport codes.");
+    }
+  });
+</script>
+{% endblock %}

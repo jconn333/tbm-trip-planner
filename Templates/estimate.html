@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}Estimate · TBM Trip Planner{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto space-y-8">
+
+  <!-- Header -->
+  <div>
+    <h1 class="text-3xl font-semibold">Estimate</h1>
+    <p class="text-slate-400 mt-1">{{ trip_label }}</p>
+  </div>
+
+  <!-- Total summary -->
+  <div class="rounded-2xl bg-slate-900 border border-slate-800 p-6">
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-5">
+        <div class="text-sm text-slate-400">Typical (total)</div>
+        <div class="mt-1 text-3xl font-semibold">{{ total_typ_cost }}</div>
+        <div class="mt-2 text-sm text-slate-400">Estimated time: <span class="text-slate-200 font-medium">{{ total_typ_time }}</span></div>
+      </div>
+
+      <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-5">
+        <div class="text-sm text-slate-400">Conservative (total)</div>
+        <div class="mt-1 text-3xl font-semibold">{{ total_con_cost }}</div>
+        <div class="mt-2 text-sm text-slate-400">Estimated time: <span class="text-slate-200 font-medium">{{ total_con_time }}</span></div>
+      </div>
+    </div>
+    <div class="mt-4 text-xs text-slate-500">
+      Total cost includes Mgmt + Maint + Engine reserve + Fuel.
+    </div>
+  </div>
+
+  <!-- Map -->
+  <div class="rounded-2xl overflow-hidden border border-slate-800">
+    <div id="map" class="h-[420px]"></div>
+  </div>
+
+  <!-- Per-leg breakdown -->
+  <div class="space-y-6">
+    {% for leg in legs %}
+      <div class="rounded-2xl bg-slate-900 border border-slate-800 p-6">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <div class="text-xs uppercase tracking-wide text-slate-500">Leg {{ loop.index }}</div>
+            <div class="text-lg font-medium mt-1">{{ leg.from_pretty }}</div>
+            <div class="text-lg font-medium">{{ leg.to_pretty }}</div>
+            <div class="text-sm text-slate-400 mt-2">Distance: {{ leg.dist_nm }} NM</div>
+          </div>
+
+          <!-- De-emphasized winds -->
+          <div class="text-right max-w-sm">
+            <div class="text-xs uppercase tracking-wide text-slate-600">Conditions</div>
+            <div class="text-sm text-slate-500 mt-1">
+              Winds aloft: <span class="text-slate-400">{{ leg.wind_sign }}{{ leg.wind_abs }} kt</span>
+            </div>
+            <div class="text-xs text-slate-600 mt-1">{{ leg.wind_details }}</div>
+          </div>
+        </div>
+
+        <div class="mt-6 grid md:grid-cols-2 gap-6">
+          <!-- Typical -->
+          <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-5">
+            <div class="text-sm font-semibold">Typical</div>
+            <div class="mt-3 space-y-2 text-sm">
+              <div class="flex justify-between">
+                <span class="text-slate-400">Cruise ground speed</span>
+                <span class="font-medium">{{ leg.typ.gs }} kt</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-400">Block time</span>
+                <span class="font-medium">{{ leg.typ.time }}</span>
+              </div>
+            </div>
+
+            <div class="mt-5 border-t border-slate-800 pt-4">
+              <div class="flex justify-between text-lg font-semibold">
+                <span>Cost</span>
+                <span>{{ leg.typ.cost }}</span>
+              </div>
+              <div class="mt-2 text-xs text-slate-500">
+                Mgmt {{ leg.typ.mgmt }} · Maint {{ leg.typ.maint }} · Engine {{ leg.typ.eng }} · Fuel {{ leg.typ.fuel }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Conservative -->
+          <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-5">
+            <div class="text-sm font-semibold">Conservative</div>
+            <div class="mt-3 space-y-2 text-sm">
+              <div class="flex justify-between">
+                <span class="text-slate-400">Cruise ground speed</span>
+                <span class="font-medium">{{ leg.con.gs }} kt</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-400">Block time</span>
+                <span class="font-medium">{{ leg.con.time }}</span>
+              </div>
+            </div>
+
+            <div class="mt-5 border-t border-slate-800 pt-4">
+              <div class="flex justify-between text-lg font-semibold">
+                <span>Cost</span>
+                <span>{{ leg.con.cost }}</span>
+              </div>
+              <div class="mt-2 text-xs text-slate-500">
+                Mgmt {{ leg.con.mgmt }} · Maint {{ leg.con.maint }} · Engine {{ leg.con.eng }} · Fuel {{ leg.con.fuel }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <!-- Back -->
+  <div class="text-center pt-4">
+    <a href="/" class="text-sky-400 hover:text-sky-300 text-sm">
+      ← New estimate
+    </a>
+  </div>
+
+</div>
+
+<!-- Leaflet -->
+<link
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+  const map = L.map("map", { zoomControl: false });
+
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 10,
+  }).addTo(map);
+
+  const dep = [{{ dep_lat|tojson }}, {{ dep_lon|tojson }}];
+  const dest = [{{ dest_lat|tojson }}, {{ dest_lon|tojson }}];
+
+  const route = L.polyline([dep, dest], { color: "#38bdf8", weight: 4 }).addTo(map);
+  L.marker(dep).addTo(map);
+  L.marker(dest).addTo(map);
+
+  map.fitBounds(route.getBounds(), { padding: [40, 40] });
+</script>
+{% endblock %}
