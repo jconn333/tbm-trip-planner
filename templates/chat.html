@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TBM Trip Planner — Chat</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #111826;
+      --panel2: #0f1623;
+      --text: #e6edf3;
+      --muted: #9fb0c0;
+      --border: rgba(255,255,255,0.10);
+      --accent: #4ea1ff;
+      --user: #1b2a41;
+      --bot: #122034;
+      --shadow: 0 12px 30px rgba(0,0,0,0.35);
+      --radius: 16px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background: radial-gradient(1200px 800px at 20% 0%, #122034 0%, var(--bg) 55%);
+      color: var(--text);
+    }
+
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 22px 16px 26px;
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 14px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+
+    .brand p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.04);
+      color: var(--muted);
+      font-size: 12px;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #23c55e;
+      box-shadow: 0 0 0 4px rgba(35,197,94,0.15);
+    }
+
+    .chat {
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-height: 60vh;
+    }
+
+    .tips {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0,0,0,0.18);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .tips b { color: var(--text); font-weight: 600; }
+
+    .log {
+      padding: 16px;
+      overflow: auto;
+      scroll-behavior: smooth;
+    }
+
+    .msg {
+      display: grid;
+      gap: 6px;
+      margin: 0 0 14px;
+    }
+
+    .bubble {
+      width: fit-content;
+      max-width: min(760px, 92%);
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      line-height: 1.4;
+      font-size: 15px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .meta {
+      font-size: 12px;
+      color: var(--muted);
+      margin-left: 6px;
+    }
+
+    .msg.user { justify-items: end; }
+    .msg.user .bubble {
+      background: linear-gradient(180deg, rgba(78,161,255,0.18), rgba(78,161,255,0.10));
+      border-color: rgba(78,161,255,0.25);
+    }
+
+    .msg.bot { justify-items: start; }
+    .msg.bot .bubble {
+      background: rgba(18,32,52,0.55);
+    }
+
+    .composer {
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: end;
+    }
+
+    textarea {
+      width: 100%;
+      resize: none;
+      min-height: 46px;
+      max-height: 200px;
+      padding: 12px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,0.22);
+      color: var(--text);
+      outline: none;
+      font-size: 15px;
+      line-height: 1.35;
+    }
+
+    textarea:focus {
+      border-color: rgba(78,161,255,0.45);
+      box-shadow: 0 0 0 4px rgba(78,161,255,0.12);
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    button {
+      border: 1px solid rgba(78,161,255,0.45);
+      background: rgba(78,161,255,0.18);
+      color: var(--text);
+      padding: 12px 14px;
+      border-radius: 14px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.05s ease, background 0.15s ease, border 0.15s ease;
+    }
+
+    button:hover { background: rgba(78,161,255,0.24); }
+    button:active { transform: translateY(1px); }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+
+    .ghost {
+      border-color: var(--border);
+      background: rgba(255,255,255,0.04);
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 8px 2px 0;
+      line-height: 1.35;
+    }
+
+    code.kbd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      padding: 2px 6px;
+      border-radius: 8px;
+      color: var(--text);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <h1>TBM Trip Planner — Chat</h1>
+        <p>Ask in plain English. I’ll estimate costs/time using the app.</p>
+      </div>
+      <div class="pill" title="This just means the page is loaded; API errors will show in the chat.">
+        <span class="status-dot"></span>
+        Ready
+      </div>
+    </header>
+
+    <section class="chat">
+      <div class="tips">
+        Try: <b>“Cost from KCAK to KSRQ tomorrow”</b>, or <b>“Round trip KCAK to KSRQ leaving Friday, back Sunday”</b>.
+      </div>
+      <div id="log" class="log" aria-live="polite"></div>
+    </section>
+
+    <section class="composer">
+      <textarea id="input" placeholder="Type a message… (Enter to send, Shift+Enter for a new line)"></textarea>
+      <div class="actions">
+        <button id="clearBtn" class="ghost" type="button">Clear</button>
+        <button id="sendBtn" type="button">Send</button>
+      </div>
+      <div class="small">
+        Tip: Press <code class="kbd">Enter</code> to send • <code class="kbd">Shift</code>+<code class="kbd">Enter</code> for newline
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const logEl = document.getElementById("log");
+    const inputEl = document.getElementById("input");
+    const sendBtn = document.getElementById("sendBtn");
+    const clearBtn = document.getElementById("clearBtn");
+
+    function nowTime() {
+      const d = new Date();
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+
+    function escapeHtml(s) {
+      return (s || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    // Strip common markdown emphasis so replies read like ChatGPT (no **stars** everywhere).
+    // We keep newlines and basic punctuation.
+    function stripMarkdown(s) {
+      if (!s) return "";
+      let t = String(s);
+
+      // bold/italic/code markers
+      t = t.replace(/\*\*(.*?)\*\*/g, "$1");
+      t = t.replace(/\*(.*?)\*/g, "$1");
+      t = t.replace(/__(.*?)__/g, "$1");
+      t = t.replace(/_(.*?)_/g, "$1");
+      t = t.replace(/`{1,3}([^`]+)`{1,3}/g, "$1");
+
+      // bullet cleanup
+      t = t.replace(/^\s*[-*]\s+/gm, "• ");
+
+      // remove leftover markdown headings
+      t = t.replace(/^\s*#{1,6}\s+/gm, "");
+
+      return t.trim();
+    }
+
+    function appendMessage(role, text) {
+      const msg = document.createElement("div");
+      msg.className = `msg ${role}`;
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      // Escape HTML, keep newlines.
+      bubble.innerHTML = escapeHtml(text);
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = (role === "user" ? "You" : "Assistant") + " • " + nowTime();
+
+      msg.appendChild(bubble);
+      msg.appendChild(meta);
+      logEl.appendChild(msg);
+
+      // scroll to bottom
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function tryAutofill(parsed) {
+      if (!parsed || typeof parsed !== "object") return;
+
+      const maybeSet = (id, value) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (value === undefined || value === null || value === "") return;
+        el.value = value;
+      };
+
+      // If your home form fields exist on this page (or you later add them), this will fill them.
+      maybeSet("dep_icao", parsed.dep);
+      maybeSet("dest_icao", parsed.dest);
+      maybeSet("trip_type", parsed.trip_type);
+      maybeSet("depart_date", parsed.depart_date);
+      maybeSet("return_date", parsed.return_date);
+    }
+
+    async function sendMessage() {
+      const raw = inputEl.value || "";
+      const text = raw.trim();
+      if (!text) return;
+
+      appendMessage("user", text);
+      inputEl.value = "";
+      inputEl.style.height = "auto";
+
+      sendBtn.disabled = true;
+      inputEl.disabled = true;
+
+      // Show a lightweight “typing…” bubble
+      const typingId = "typing_" + Math.random().toString(16).slice(2);
+      appendMessage("bot", "…");
+      const typingBubble = logEl.querySelector(".msg.bot:last-child .bubble");
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text })
+        });
+
+        const isJson = (res.headers.get("content-type") || "").includes("application/json");
+        const data = isJson ? await res.json() : { reply: await res.text() };
+
+        if (!res.ok) {
+          const errText = (data && (data.error || data.reply)) ? (data.error || data.reply) : ("HTTP " + res.status);
+          typingBubble.innerHTML = escapeHtml("Error: " + errText);
+          return;
+        }
+
+        const replyRaw = (data && data.reply) ? data.reply : "";
+        const replyClean = stripMarkdown(replyRaw);
+
+        typingBubble.innerHTML = escapeHtml(replyClean || "I didn’t get a reply back. Try again?");
+        tryAutofill(data.parsed);
+
+      } catch (e) {
+        typingBubble.innerHTML = escapeHtml("Error: Couldn’t reach /api/chat. Is the Flask server running?");
+      } finally {
+        sendBtn.disabled = false;
+        inputEl.disabled = false;
+        inputEl.focus();
+      }
+    }
+
+    // Auto-grow textarea
+    inputEl.addEventListener("input", () => {
+      inputEl.style.height = "auto";
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + "px";
+    });
+
+    // Enter to send; Shift+Enter for newline
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    sendBtn.addEventListener("click", sendMessage);
+
+    clearBtn.addEventListener("click", () => {
+      logEl.innerHTML = "";
+      inputEl.value = "";
+      inputEl.focus();
+    });
+
+    // Seed a friendly welcome message
+    appendMessage("bot", "Hey — tell me where you’re flying from and to, and when. Example: “KCAK to KSRQ tomorrow.”");
+    inputEl.focus();
+  </script>
+</body>
+</html>

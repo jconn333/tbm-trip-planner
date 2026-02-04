@@ -1,246 +1,784 @@
-{% extends "base.html" %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TBM Trip Planner</title>
 
-{% block title %}TBM Trip Planner{% endblock %}
-
-{% block content %}
-<div class="max-w-2xl mx-auto">
-  <h1 class="text-3xl font-semibold mb-2">TBM Trip Planner</h1>
-  <p class="text-slate-400 mb-8">
-    Airline-style trip planning with winds aloft and TBM operating cost assumptions.
-  </p>
-
-  <form method="post" action="/start" class="space-y-6" id="tripForm">
-    <!-- Trip type -->
-    <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-      <div class="text-sm font-medium mb-3">Trip type</div>
-      <div class="flex gap-3">
-        <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-800 bg-slate-900/40 cursor-pointer">
-          <input type="radio" name="trip_type" value="oneway" checked class="h-4 w-4" />
-          <span class="text-sm">One-way</span>
-        </label>
-        <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-800 bg-slate-900/40 cursor-pointer">
-          <input type="radio" name="trip_type" value="roundtrip" class="h-4 w-4" />
-          <span class="text-sm">Round trip</span>
-        </label>
-      </div>
-      <p class="text-xs text-slate-500 mt-2">
-        Round trip will estimate both legs and show a total + per-leg breakdown.
-      </p>
-    </div>
-
-    <!-- Airports -->
-    <div>
-      <label class="block text-sm font-medium mb-1">Departing from</label>
-
-      <!-- visible field (typeahead) -->
-      <input
-        id="dep_input"
-        name="dep_query"
-        placeholder="KCAK or Canton, OH"
-        autocomplete="off"
-        required
-        class="w-full rounded-lg bg-slate-900 border border-slate-700 px-4 py-3
-               focus:outline-none focus:ring-2 focus:ring-sky-500"
-      />
-
-      <!-- hidden selected ICAO -->
-      <input type="hidden" id="dep_icao" name="dep_icao" />
-      <div id="dep_dropdown" class="relative"></div>
-    </div>
-
-    <div>
-      <label class="block text-sm font-medium mb-1">Destination</label>
-
-      <!-- visible field (typeahead) -->
-      <input
-        id="dest_input"
-        name="dest_query"
-        placeholder="KDEN or Denver, CO"
-        autocomplete="off"
-        required
-        class="w-full rounded-lg bg-slate-900 border border-slate-700 px-4 py-3
-               focus:outline-none focus:ring-2 focus:ring-sky-500"
-      />
-
-      <!-- hidden selected ICAO -->
-      <input type="hidden" id="dest_icao" name="dest_icao" />
-      <div id="dest_dropdown" class="relative"></div>
-    </div>
-
-    <!-- Dates -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <div>
-        <label class="block text-sm font-medium mb-1">
-          Departure date <span class="text-slate-400">(optional)</span>
-        </label>
-
-        <input
-          type="date"
-          name="depart_dt"
-          id="depart_dt"
-          class="w-full rounded-lg bg-slate-900 border border-slate-700 px-4 py-3
-                 focus:outline-none focus:ring-2 focus:ring-sky-500"
-        />
-
-        <p class="text-xs text-slate-500 mt-1">
-          Used to choose 6 / 12 / 24 hr winds forecast bucket
-        </p>
-      </div>
-
-      <div id="return_wrap" class="hidden">
-        <label class="block text-sm font-medium mb-1">
-          Return date <span class="text-slate-400">(optional)</span>
-        </label>
-
-        <input
-          type="date"
-          name="return_dt"
-          id="return_dt"
-          class="w-full rounded-lg bg-slate-900 border border-slate-700 px-4 py-3
-                 focus:outline-none focus:ring-2 focus:ring-sky-500"
-        />
-
-        <p class="text-xs text-slate-500 mt-1">
-          Only used for round trip
-        </p>
-      </div>
-    </div>
-
-    <button type="submit"
-      class="w-full rounded-xl bg-sky-600 hover:bg-sky-500 transition font-semibold py-3 text-lg">
-      Get Estimate
-    </button>
-
-    <p class="text-xs text-slate-500 pt-2">
-      Planning estimate only (not for operational flight planning).
-    </p>
-  </form>
-</div>
-
-<script>
-  // -----------------------------
-  // Trip type toggle: show/hide return date
-  // -----------------------------
-  const returnWrap = document.getElementById("return_wrap");
-  const tripTypeRadios = document.querySelectorAll('input[name="trip_type"]');
-
-  function syncReturnVisibility() {
-    const type = document.querySelector('input[name="trip_type"]:checked')?.value || "oneway";
-    if (type === "roundtrip") {
-      returnWrap.classList.remove("hidden");
-    } else {
-      returnWrap.classList.add("hidden");
-      const ret = document.getElementById("return_dt");
-      if (ret) ret.value = "";
-    }
-  }
-  tripTypeRadios.forEach(r => r.addEventListener("change", syncReturnVisibility));
-  syncReturnVisibility();
-
-  // -----------------------------
-  // Date picker: click anywhere
-  // -----------------------------
-  function openNativePicker(inputEl) {
-    if (!inputEl) return;
-
-    // Chrome/Edge
-    if (typeof inputEl.showPicker === "function") {
-      inputEl.showPicker();
-      return;
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:rgba(255,255,255,0.06);
+      --panel2:rgba(255,255,255,0.08);
+      --stroke:rgba(255,255,255,0.12);
+      --text:rgba(255,255,255,0.92);
+      --muted:rgba(255,255,255,0.65);
+      --muted2:rgba(255,255,255,0.52);
+      --shadow:0 16px 44px rgba(0,0,0,0.42);
+      --accent:#6ea8fe;
+      --accent2:#7cf2c2;
+      --danger:#ff5c70;
+      --ok:#7cf2c2;
+      --sans:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";
+      --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+      --radius:18px;
     }
 
-    // Safari fallback
-    inputEl.focus();
-    inputEl.click();
-  }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
 
-  document.addEventListener("click", (e) => {
-    const dep = document.getElementById("depart_dt");
-    const ret = document.getElementById("return_dt");
+    body{
+      margin:0;
+      font-family:var(--sans);
+      color:var(--text);
+      background:
+        radial-gradient(1200px 540px at 16% 12%, rgba(110,168,254,0.18), transparent 60%),
+        radial-gradient(900px 520px at 82% 26%, rgba(124,242,194,0.14), transparent 60%),
+        radial-gradient(900px 680px at 50% 100%, rgba(255,255,255,0.05), transparent 70%),
+        var(--bg);
+    }
 
-    if (dep && e.target === dep) openNativePicker(dep);
-    if (ret && e.target === ret) openNativePicker(ret);
-  });
+    .wrap{ max-width:980px; margin:0 auto; padding:26px 16px 66px; }
 
-  // -----------------------------
-  // Typeahead: airports dropdown
-  // -----------------------------
-  async function fetchAirports(q) {
-    const url = `/api/airports?q=${encodeURIComponent(q)}`;
-    const res = await fetch(url);
-    if (!res.ok) return [];
-    return await res.json();
-  }
+    /* Header */
+    .topbar{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:16px; }
+    .brand{ display:flex; align-items:center; gap:12px; }
+    .logo{
+      width:38px; height:38px; border-radius:14px;
+      background:linear-gradient(135deg, rgba(110,168,254,0.95), rgba(124,242,194,0.88));
+      box-shadow:0 10px 24px rgba(110,168,254,0.18);
+      flex:0 0 auto;
+    }
+    .brand h1{ margin:0; font-size:17px; letter-spacing:0.2px; line-height:1.2; }
+    .brand .sub{ margin-top:3px; font-size:12.5px; color:var(--muted); }
+    .badge{
+      display:inline-flex; align-items:center; gap:8px;
+      padding:8px 11px; border-radius:999px;
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.05);
+      color:var(--muted);
+      font-size:12.5px;
+      white-space:nowrap;
+      height:fit-content;
+    }
+    .dot{ width:8px; height:8px; border-radius:99px; background:var(--ok); display:inline-block; }
 
-  function renderDropdown(container, items, onPick) {
-    container.innerHTML = "";
+    /* Layout */
+    .grid{ display:grid; grid-template-columns: 1.06fr 0.94fr; gap:14px; }
+    @media (max-width:920px){ .grid{ grid-template-columns:1fr; } }
 
-    if (!items || items.length === 0) return;
+    /* Cards */
+    .card{
+      background:linear-gradient(180deg, var(--panel), rgba(255,255,255,0.045));
+      border:1px solid var(--stroke);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+    .cardHeader{
+      padding:14px 16px 10px;
+      border-bottom:1px solid rgba(255,255,255,0.08);
+      background:rgba(0,0,0,0.10);
+    }
+    .cardHeader h2{ margin:0; font-size:14px; letter-spacing:0.2px; }
+    .cardHeader p{ margin:6px 0 0; color:var(--muted); font-size:12.8px; line-height:1.35; }
+    .cardBody{ padding:16px; }
 
-    const box = document.createElement("div");
-    box.className = "absolute z-20 mt-2 w-full rounded-xl border border-slate-800 bg-slate-950 shadow-lg overflow-hidden";
+    .error{
+      margin:0 0 12px;
+      padding:10px 12px;
+      border-radius:14px;
+      border:1px solid rgba(255,92,112,0.42);
+      background:rgba(255,92,112,0.10);
+      color:rgba(255,255,255,0.92);
+      font-size:13px;
+    }
 
-    items.forEach((it) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "w-full text-left px-4 py-3 hover:bg-slate-900 transition text-sm";
-      btn.textContent = it.label;
-      btn.addEventListener("click", () => onPick(it));
-      box.appendChild(btn);
-    });
+    /* Form */
+    form .row{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:12px;
+      margin-bottom:12px;
+    }
+    @media (max-width:560px){ form .row{ grid-template-columns:1fr; } }
 
-    container.appendChild(box);
-  }
+    .field label{ display:block; margin:0 0 6px; font-size:12px; color:var(--muted); }
 
-  function setupTypeahead(inputId, hiddenId, dropdownId) {
-    const input = document.getElementById(inputId);
-    const hidden = document.getElementById(hiddenId);
-    const dropdown = document.getElementById(dropdownId);
+    .inputWrap{ position:relative; }
 
-    let lastQ = "";
-    let timer = null;
+    input,select,textarea{
+      width:100%;
+      padding:11px 12px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,0.14);
+      background:rgba(255,255,255,0.06);
+      color:var(--text);
+      outline:none;
+      font-size:14px;
+    }
+    input::placeholder,textarea::placeholder{ color:rgba(255,255,255,0.38); }
+    input:focus,select:focus,textarea:focus{
+      border-color:rgba(110,168,254,0.55);
+      box-shadow:0 0 0 4px rgba(110,168,254,0.12);
+    }
 
-    input.addEventListener("input", () => {
-      const q = (input.value || "").trim();
-      hidden.value = ""; // clear selection if user edits
-      if (timer) clearTimeout(timer);
+    /* Date picker polish */
+    input[type="date"]{ color-scheme:dark; cursor:pointer; }
+    .help{
+      margin-top:6px;
+      font-size:12px;
+      color:var(--muted2);
+      min-height:16px;
+    }
+    .help strong{ color:rgba(255,255,255,0.82); font-weight:650; }
 
-      timer = setTimeout(async () => {
-        if (q.length < 2) {
-          dropdown.innerHTML = "";
+    .actions{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:12px; margin-top:10px; flex-wrap:wrap;
+    }
+
+    .btn{
+      appearance:none;
+      border:1px solid rgba(255,255,255,0.14);
+      background:rgba(255,255,255,0.08);
+      color:var(--text);
+      padding:10px 13px;
+      border-radius:14px;
+      cursor:pointer;
+      font-weight:650;
+      font-size:13.5px;
+      letter-spacing:0.15px;
+    }
+    .btn:hover{ background:rgba(255,255,255,0.11); }
+    .btn:disabled{ opacity:0.55; cursor:not-allowed; }
+
+    .btnPrimary{
+      border:1px solid rgba(110,168,254,0.62);
+      background:linear-gradient(135deg, rgba(110,168,254,0.92), rgba(124,242,194,0.50));
+      color:#0b1220;
+      box-shadow:0 10px 20px rgba(110,168,254,0.14);
+    }
+
+    .micro{ color:var(--muted2); font-size:12px; line-height:1.35; }
+
+    /* Autocomplete */
+    .suggestions{
+      position:absolute;
+      top:calc(100% + 8px);
+      left:0; right:0;
+      z-index:50;
+      background:rgba(15,22,36,0.98);
+      border:1px solid rgba(255,255,255,0.14);
+      border-radius:14px;
+      overflow:hidden;
+      box-shadow:0 16px 36px rgba(0,0,0,0.50);
+      display:none;
+      max-height:240px;
+      overflow-y:auto;
+    }
+    .suggestions button{
+      width:100%;
+      text-align:left;
+      border:0;
+      background:transparent;
+      color:var(--text);
+      padding:10px 12px;
+      cursor:pointer;
+      font-size:13px;
+      line-height:1.25;
+      border-bottom:1px solid rgba(255,255,255,0.07);
+    }
+    .suggestions button:hover{ background:rgba(110,168,254,0.10); }
+    .suggestions button:last-child{ border-bottom:0; }
+
+    /* Chat */
+    .chatThread{
+      height:308px;
+      overflow:auto;
+      padding:12px;
+      background:rgba(255,255,255,0.035);
+      border:1px solid rgba(255,255,255,0.10);
+      border-radius:16px;
+    }
+    .bubbleRow{ display:flex; margin:9px 0; gap:10px; }
+    .bubbleRow.me{ justify-content:flex-end; }
+    .bubble{
+      max-width:86%;
+      border-radius:16px;
+      padding:10px 12px;
+      border:1px solid rgba(255,255,255,0.10);
+      white-space:pre-wrap;
+      line-height:1.35;
+      font-size:14px;
+    }
+    .bubble.me{ background:rgba(255,255,255,0.085); }
+    .bubble.ai{ background:rgba(110,168,254,0.09); border-color:rgba(110,168,254,0.20); }
+
+    .chatForm{ display:flex; gap:10px; margin-top:10px; align-items:flex-end; }
+    .chatForm textarea{ min-height:44px; max-height:120px; resize:none; padding:11px 12px; }
+
+    .chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .chip{
+      border:1px solid rgba(255,255,255,0.14);
+      background:rgba(255,255,255,0.05);
+      color:var(--muted);
+      padding:7px 10px;
+      border-radius:999px;
+      font-size:12.5px;
+      cursor:pointer;
+      user-select:none;
+    }
+    .chip:hover{ background:rgba(255,255,255,0.08); color:var(--text); }
+
+    .status{ margin-top:8px; font-size:12.5px; color:var(--muted); min-height:18px; }
+
+    .typing{ display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; }
+    .dots{ display:inline-flex; gap:3px; align-items:center; }
+    .dotB{
+      width:6px; height:6px; border-radius:99px;
+      background:rgba(255,255,255,0.55);
+      animation:bounce 1.2s infinite ease-in-out;
+    }
+    .dotB:nth-child(2){ animation-delay:0.15s; }
+    .dotB:nth-child(3){ animation-delay:0.30s; }
+    @keyframes bounce{
+      0%,80%,100%{ transform:translateY(0); opacity:0.55; }
+      40%{ transform:translateY(-4px); opacity:0.95; }
+    }
+
+    .kbd{
+      font-family:var(--mono);
+      font-size:11px;
+      border:1px solid rgba(255,255,255,0.14);
+      background:rgba(255,255,255,0.05);
+      padding:2px 6px;
+      border-radius:7px;
+      color:var(--muted);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"></div>
+        <div>
+          <h1>TBM Trip Planner</h1>
+          <div class="sub">Use the form or just ask naturally.</div>
+        </div>
+      </div>
+
+      <div class="badge" title="Local dev server">
+        <span class="dot" aria-hidden="true"></span>
+        Local
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- LEFT: FORM -->
+      <div class="card">
+        <div class="cardHeader">
+          <h2>Estimate with the form</h2>
+          <p>Pick airports + dates. Winds and reserves are included automatically.</p>
+        </div>
+
+        <div class="cardBody">
+          {% if error %}
+            <div class="error">{{ error }}</div>
+          {% endif %}
+
+          <form method="POST" action="/estimate" id="tripForm" autocomplete="off">
+            <div class="row">
+              <div class="field">
+                <label for="dep">Departure</label>
+                <div class="inputWrap">
+                  <input id="dep" name="dep_icao" placeholder="KCAK, Akron, Cleveland…" />
+                  <div id="depSug" class="suggestions" role="listbox" aria-label="Departure suggestions"></div>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="dest">Destination</label>
+                <div class="inputWrap">
+                  <input id="dest" name="dest_icao" placeholder="KSRQ, Sarasota, Tampa…" />
+                  <div id="destSug" class="suggestions" role="listbox" aria-label="Destination suggestions"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="field">
+                <label for="depart_date">Depart</label>
+                <input id="depart_date" name="depart_date" type="date" />
+                <div id="depart_help" class="help"></div>
+              </div>
+
+              <div class="field">
+                <label for="return_date">Return (optional)</label>
+                <input id="return_date" name="return_date" type="date" />
+                <div id="return_help" class="help"></div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="field">
+                <label for="trip_type">Trip type</label>
+                <select id="trip_type" name="trip_type">
+                  <option value="oneway">One-way</option>
+                  <option value="roundtrip">Round trip</option>
+                </select>
+                <div class="help" id="type_help"></div>
+              </div>
+
+              <div class="field">
+                <label>&nbsp;</label>
+                <div class="actions">
+                  <button class="btn btnPrimary" type="submit">Calculate</button>
+                  <div class="micro">Tip: start typing a city to search airports.</div>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- RIGHT: CHAT -->
+      <div class="card">
+        <div class="cardHeader">
+          <h2>Or just chat</h2>
+          <p>Plain text responses, more like ChatGPT.</p>
+        </div>
+
+        <div class="cardBody">
+          <div id="chatThread" class="chatThread" aria-live="polite">
+            <div class="typing" style="opacity:.9;">
+              Try: “How much to fly from KCAK to KSRQ tomorrow?”
+            </div>
+          </div>
+
+          <div class="chips" aria-label="Example prompts">
+            <div class="chip" data-msg="How much would it cost to fly from KCAK to KSRQ tomorrow?">KCAK → KSRQ tomorrow</div>
+            <div class="chip" data-msg="Round trip from KCAK to KSRQ leaving tomorrow and returning the next day.">Round trip tomorrow</div>
+            <div class="chip" data-msg="What’s the block time from KCAK to KSRQ today?">Block time</div>
+          </div>
+
+          <form id="chatForm" class="chatForm">
+            <textarea id="chatInput" placeholder="Ask about a trip…" spellcheck="false"></textarea>
+            <button id="chatSend" class="btn btnPrimary" type="submit">Send</button>
+          </form>
+
+          <div id="chatStatus" class="status"></div>
+          <div class="micro">
+            <span class="kbd">Enter</span> to send · <span class="kbd">Shift</span>+<span class="kbd">Enter</span> for a new line
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---------- Airport autocomplete ----------
+    function setupAirportAutocomplete(inputEl, sugEl) {
+      let debounceTimer = null;
+
+      function close(){ sugEl.style.display="none"; sugEl.innerHTML=""; }
+      function open(){ sugEl.style.display="block"; }
+
+      async function fetchAirports(q){
+        const res = await fetch(`/api/airports?q=${encodeURIComponent(q)}`);
+        if(!res.ok) return [];
+        return await res.json();
+      }
+
+      function pick(item){
+        inputEl.value = item.icao; // server expects ICAO
+        close();
+        inputEl.focus();
+      }
+
+      inputEl.addEventListener("input", () => {
+        const q = (inputEl.value || "").trim();
+        clearTimeout(debounceTimer);
+        if(q.length < 2){ close(); return; }
+
+        debounceTimer = setTimeout(async () => {
+          const items = await fetchAirports(q);
+          if(!items || items.length === 0){ close(); return; }
+
+          sugEl.innerHTML = "";
+          items.forEach(it => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.textContent = it.label;
+            btn.addEventListener("click", () => pick(it));
+            sugEl.appendChild(btn);
+          });
+          open();
+        }, 160);
+      });
+
+      inputEl.addEventListener("blur", () => setTimeout(close, 120));
+      inputEl.addEventListener("focus", () => {
+        const q = (inputEl.value || "").trim();
+        if(q.length >= 2 && sugEl.innerHTML.trim()) open();
+      });
+
+      document.addEventListener("keydown", (e) => { if(e.key === "Escape") close(); });
+    }
+
+    const depEl  = document.getElementById("dep");
+    const destEl = document.getElementById("dest");
+    setupAirportAutocomplete(depEl, document.getElementById("depSug"));
+    setupAirportAutocomplete(destEl, document.getElementById("destSug"));
+
+    // ---------- Date helpers ----------
+    const departInput = document.getElementById("depart_date");
+    const returnInput = document.getElementById("return_date");
+    const departHelp  = document.getElementById("depart_help");
+    const returnHelp  = document.getElementById("return_help");
+    const tripTypeEl  = document.getElementById("trip_type");
+    const typeHelp    = document.getElementById("type_help");
+
+    function pad2(n){ return String(n).padStart(2, "0"); }
+    function toISODate(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
+
+    function startOfDay(d){
+      const x = new Date(d);
+      x.setHours(0,0,0,0);
+      return x;
+    }
+
+    function parseNaturalDateFromText(text){
+      const t = (text || "").toLowerCase();
+
+      // Explicit YYYY-MM-DD
+      const iso = t.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+      if(iso){
+        const d = new Date(iso[1] + "T00:00:00");
+        if(!isNaN(d)) return startOfDay(d);
+      }
+
+      // US-style M/D[/YYYY]
+      const us = t.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+      if(us){
+        let m = parseInt(us[1],10);
+        let day = parseInt(us[2],10);
+        let y = us[3] ? parseInt(us[3],10) : (new Date()).getFullYear();
+        if(y < 100) y += 2000;
+        const d = new Date(y, m-1, day);
+        if(!isNaN(d)) return startOfDay(d);
+      }
+
+      const today = startOfDay(new Date());
+
+      if(/\bday after tomorrow\b/.test(t)){
+        const d = new Date(today); d.setDate(d.getDate()+2); return d;
+      }
+      if(/\btomorrow\b/.test(t)){
+        const d = new Date(today); d.setDate(d.getDate()+1); return d;
+      }
+      if(/\btoday\b/.test(t)){
+        return today;
+      }
+
+      // "next day" / "the next day"
+      if(/\bnext day\b/.test(t) || /\bthe next day\b/.test(t)){
+        const d = new Date(today); d.setDate(d.getDate()+1); return d;
+      }
+
+      // "Feb 7" / "February 7" / "Feb 7 2026"
+      // Let Date.parse try (works well in modern browsers)
+      const monthWord = t.match(/\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b/);
+      if(monthWord){
+        // Grab a small window around the month word
+        const idx = t.indexOf(monthWord[0]);
+        const snippet = t.slice(Math.max(0, idx-10), Math.min(t.length, idx+20));
+        const parsed = new Date(snippet);
+        if(!isNaN(parsed)) return startOfDay(parsed);
+      }
+
+      return null;
+    }
+
+    function relativeLabel(isoStr){
+      if(!isoStr) return "";
+      const d = startOfDay(new Date(isoStr + "T00:00:00"));
+      if(isNaN(d)) return "";
+      const today = startOfDay(new Date());
+      const diffDays = Math.round((d - today) / (24*60*60*1000));
+
+      const dow = d.toLocaleDateString(undefined, { weekday: "short" });
+      const nice = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+      if(diffDays === 0) return `Today (${dow})`;
+      if(diffDays === 1) return `Tomorrow (${dow})`;
+      if(diffDays === 2) return `Day after tomorrow (${dow})`;
+      if(diffDays === -1) return `Yesterday (${dow})`;
+      return `${nice} (${dow})`;
+    }
+
+    function updateDateHelpers(){
+      const depLabel = relativeLabel(departInput.value);
+      const retLabel = relativeLabel(returnInput.value);
+
+      departHelp.innerHTML = depLabel ? `Looks like <strong>${depLabel}</strong>.` : "";
+      returnHelp.innerHTML = retLabel ? `Looks like <strong>${retLabel}</strong>.` : "";
+
+      // Tiny hint for trip type clarity
+      if(tripTypeEl.value === "roundtrip" && !returnInput.value){
+        typeHelp.innerHTML = `Round trip selected — you can leave Return empty and I’ll assume next day.`;
+      } else {
+        typeHelp.innerHTML = "";
+      }
+    }
+
+    // Default depart to tomorrow if empty
+    (function seedDates(){
+      if(!departInput.value){
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        departInput.value = toISODate(d);
+      }
+      updateDateHelpers();
+    })();
+
+    departInput.addEventListener("change", updateDateHelpers);
+    returnInput.addEventListener("change", updateDateHelpers);
+    tripTypeEl.addEventListener("change", updateDateHelpers);
+
+    // Click-anywhere date picker (wrapper click)
+    function enableFullClickDatePicker(inputId){
+      const input = document.getElementById(inputId);
+      if(!input) return;
+
+      const wrapper = input.closest(".field");
+      if(!wrapper) return;
+
+      wrapper.addEventListener("click", (e) => {
+        // If they clicked a suggestion list etc, ignore
+        if(e.target && (e.target.tagName === "BUTTON")) return;
+
+        input.focus();
+        if(typeof input.showPicker === "function"){
+          try { input.showPicker(); } catch(_) {}
+        }
+      });
+    }
+    enableFullClickDatePicker("depart_date");
+    enableFullClickDatePicker("return_date");
+
+    // ---------- Chat ----------
+    const thread = document.getElementById("chatThread");
+    const form = document.getElementById("chatForm");
+    const input = document.getElementById("chatInput");
+    const sendBtn = document.getElementById("chatSend");
+    const status = document.getElementById("chatStatus");
+
+    function scrollToBottom(){ thread.scrollTop = thread.scrollHeight; }
+
+    function clearPlaceholderIfNeeded(){
+      if(thread.children.length === 1 && thread.textContent.includes("Try:")){
+        thread.innerHTML = "";
+      }
+    }
+
+    function addBubble(text, who){
+      const row = document.createElement("div");
+      row.className = "bubbleRow " + (who === "me" ? "me" : "ai");
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble " + (who === "me" ? "me" : "ai");
+      bubble.textContent = text; // plain text
+
+      row.appendChild(bubble);
+      thread.appendChild(row);
+      scrollToBottom();
+    }
+
+    function showTyping(){
+      const row = document.createElement("div");
+      row.className = "bubbleRow ai";
+      row.id = "typingRow";
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble ai";
+      bubble.style.display = "inline-flex";
+      bubble.style.alignItems = "center";
+      bubble.style.gap = "8px";
+
+      const label = document.createElement("span");
+      label.className = "typing";
+      label.textContent = "Thinking";
+
+      const dots = document.createElement("span");
+      dots.className = "dots";
+      dots.innerHTML = '<span class="dotB"></span><span class="dotB"></span><span class="dotB"></span>';
+
+      bubble.appendChild(label);
+      bubble.appendChild(dots);
+      row.appendChild(bubble);
+      thread.appendChild(row);
+      scrollToBottom();
+    }
+
+    function hideTyping(){
+      const el = document.getElementById("typingRow");
+      if(el) el.remove();
+    }
+
+    function setBusy(b){
+      sendBtn.disabled = b;
+      input.disabled = b;
+      if(b) status.textContent = "";
+    }
+
+    // ---- Chat → Form sync (airports, trip type, dates) ----
+    function extractICAOCodes(text){
+      const m = (text || "").toUpperCase().match(/\bK[A-Z0-9]{3}\b/g);
+      return m ? Array.from(new Set(m)) : [];
+    }
+
+    function inferTripType(text){
+      const t = (text || "").toLowerCase();
+      if(t.includes("round trip") || t.includes("roundtrip") || t.includes("returning") || t.includes("return trip")){
+        return "roundtrip";
+      }
+      return null;
+    }
+
+    function inferReturnDate(text, departDate){
+      const t = (text || "").toLowerCase();
+      if(t.includes("next day") || t.includes("the next day") || t.includes("day after")){
+        // if "day after tomorrow" exists, parseNaturalDateFromText will catch it. This is for return phrasing.
+        if(departDate){
+          const d = new Date(departDate);
+          d.setDate(d.getDate()+1);
+          return startOfDay(d);
+        }
+      }
+      return null;
+    }
+
+    function syncFormFromChat(message){
+      const codes = extractICAOCodes(message);
+      if(codes.length >= 2){
+        depEl.value = codes[0];
+        destEl.value = codes[1];
+      }
+
+      const tt = inferTripType(message);
+      if(tt){
+        tripTypeEl.value = tt;
+      }
+
+      // Depart date from text
+      const depDate = parseNaturalDateFromText(message);
+      if(depDate){
+        departInput.value = toISODate(depDate);
+      }
+
+      // Return date: if message contains a second explicit date, try to find it
+      // quick approach: if there are 2 ISO dates, use the second as return
+      const isoDates = (message || "").match(/\b\d{4}-\d{2}-\d{2}\b/g);
+      if(isoDates && isoDates.length >= 2){
+        const rd = new Date(isoDates[1] + "T00:00:00");
+        if(!isNaN(rd)) returnInput.value = toISODate(startOfDay(rd));
+      } else {
+        // If roundtrip selected and no return date, infer next-day if phrasing suggests it
+        if(tripTypeEl.value === "roundtrip"){
+          const d = departInput.value ? startOfDay(new Date(departInput.value + "T00:00:00")) : null;
+          const inferred = inferReturnDate(message, d);
+          if(inferred) returnInput.value = toISODate(inferred);
+        }
+      }
+
+      updateDateHelpers();
+    }
+
+    async function sendMessage(message){
+      setBusy(true);
+      showTyping();
+
+      try{
+        const res = await fetch("/api/chat", {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ message })
+        });
+
+        const data = await res.json().catch(() => null);
+        hideTyping();
+
+        if(!res.ok){
+          const errText = data?.error || `Request failed (${res.status})`;
+          status.textContent = errText;
+          addBubble("Something went wrong. " + errText, "ai");
           return;
         }
-        lastQ = q;
-        const items = await fetchAirports(q);
-        // avoid race
-        if (lastQ !== q) return;
-        renderDropdown(dropdown, items, (picked) => {
-          input.value = picked.label;
-          hidden.value = picked.icao;
-          dropdown.innerHTML = "";
-        });
-      }, 150);
-    });
 
-    // close dropdown on outside click
-    document.addEventListener("click", (e) => {
-      if (!dropdown.contains(e.target) && e.target !== input) {
-        dropdown.innerHTML = "";
+        if(data?.reply){
+          addBubble(data.reply, "ai");
+        } else if(data?.error){
+          status.textContent = data.error;
+          addBubble("Something went wrong. " + data.error, "ai");
+        } else {
+          addBubble("Hmm—got an unexpected response from the server.", "ai");
+        }
+      } catch(e){
+        hideTyping();
+        status.textContent = String(e);
+        addBubble("Couldn’t reach the server. " + String(e), "ai");
+      } finally {
+        setBusy(false);
+        input.focus();
+      }
+    }
+
+    // Enter to send, Shift+Enter newline
+    input.addEventListener("keydown", (e) => {
+      if(e.key === "Enter" && !e.shiftKey){
+        e.preventDefault();
+        form.requestSubmit();
       }
     });
-  }
 
-  setupTypeahead("dep_input", "dep_icao", "dep_dropdown");
-  setupTypeahead("dest_input", "dest_icao", "dest_dropdown");
-
-  // Require that a dropdown choice was actually selected (ICAO filled)
-  document.getElementById("tripForm").addEventListener("submit", (e) => {
-    const depIcao = (document.getElementById("dep_icao").value || "").trim();
-    const destIcao = (document.getElementById("dest_icao").value || "").trim();
-    if (!depIcao || !destIcao) {
+    form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      alert("Please select airports from the dropdown list so we have exact airport codes.");
-    }
-  });
-</script>
-{% endblock %}
+      const msg = (input.value || "").trim();
+      if(!msg) return;
+
+      clearPlaceholderIfNeeded();
+      addBubble(msg, "me");
+
+      // Sync chat -> form immediately (even before server reply)
+      syncFormFromChat(msg);
+
+      input.value = "";
+      await sendMessage(msg);
+    });
+
+    // Example chips
+    document.querySelectorAll(".chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        const msg = chip.getAttribute("data-msg") || "";
+        input.value = msg;
+        input.focus();
+        // Also sync the form on chip click (nice touch)
+        syncFormFromChat(msg);
+      });
+    });
+
+    // Extra: If user selects roundtrip and return is blank, set return to next day (gentle convenience)
+    tripTypeEl.addEventListener("change", () => {
+      if(tripTypeEl.value === "roundtrip" && !returnInput.value && departInput.value){
+        const d = new Date(departInput.value + "T00:00:00");
+        d.setDate(d.getDate()+1);
+        returnInput.value = toISODate(d);
+      }
+      updateDateHelpers();
+    });
+  </script>
+</body>
+</html>

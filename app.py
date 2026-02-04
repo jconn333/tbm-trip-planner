@@ -1,16 +1,35 @@
 from __future__ import annotations
 
-from flask import Flask, request, render_template, jsonify
-import airportsdata
-from math import radians, sin, cos, asin, sqrt, atan2, degrees
-from datetime import datetime
-import urllib.request
-import urllib.parse
+import os
+import json
 import re
 import ssl
 import certifi
+import urllib.request
+import urllib.parse
 
-app = Flask(__name__)
+from math import radians, sin, cos, asin, sqrt, atan2, degrees
+from datetime import datetime, date, timedelta
+
+from flask import Flask, request, render_template, jsonify
+import airportsdata
+
+from dotenv import load_dotenv
+
+# ------------------ Env (.env) ------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+
+# ------------------ OpenAI ------------------
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
+
+# IMPORTANT: your repo uses "Templates" (capital T)
+app = Flask(__name__, template_folder="Templates")
+
+APP_NAME = "TBM Trip Planner"
 
 # --- Config ---
 TAS_TYPICAL = 290  # kt
@@ -28,11 +47,12 @@ FUEL_BURN_GPH = 60
 
 # Winds Aloft (FD)
 WINDS_REGION = "us"
-WINDS_LEVEL = "low"       # includes 24000/30000/etc in this API format
-WINDS_LAYOUT = "off"      # raw text
-ALT_TARGET_FT = 27000     # we interpolate between 24000 and 30000
+WINDS_LEVEL = "low"
+WINDS_LAYOUT = "off"
+ALT_TARGET_FT = 27000  # interpolate between 24000 and 30000
 
 AIRPORTS = airportsdata.load("ICAO")
+
 
 # ------------------ Math helpers ------------------
 def haversine_nm(lat1, lon1, lat2, lon2) -> float:
@@ -44,6 +64,7 @@ def haversine_nm(lat1, lon1, lat2, lon2) -> float:
     c = 2 * asin(sqrt(a))
     return (R_km * c) * km_to_nm
 
+
 def initial_bearing_deg(lat1, lon1, lat2, lon2) -> float:
     phi1 = radians(lat1)
     phi2 = radians(lat2)
@@ -53,15 +74,14 @@ def initial_bearing_deg(lat1, lon1, lat2, lon2) -> float:
     brg = (degrees(atan2(y, x)) + 360) % 360
     return brg
 
+
 def format_hhmm(total_minutes: int) -> str:
     hh = total_minutes // 60
     mm = total_minutes % 60
     return f"{hh}:{mm:02d}"
 
-# ------------------ Airport resolution ------------------
-def normalize(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "").strip()).upper()
 
+# ------------------ Airport resolution ------------------
 def airport_to_choice(icao: str, a: dict) -> dict:
     return {
         "icao": icao,
@@ -74,6 +94,7 @@ def airport_to_choice(icao: str, a: dict) -> dict:
         "region": a.get("region") or "",
     }
 
+
 def pretty_airport(choice: dict) -> str:
     icao = choice["icao"]
     iata = choice["iata"]
@@ -84,57 +105,20 @@ def pretty_airport(choice: dict) -> str:
     loc = f"{city}, {country}".strip().strip(",")
     return f"{name} ({code}) — {loc}"
 
+
 def get_airport_by_icao(icao: str) -> dict:
     a = AIRPORTS[icao]
     return airport_to_choice(icao, a)
 
-US_STATE_NAME_TO_CODE = {
-    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA",
-    "colorado": "CO", "connecticut": "CT", "delaware": "DE", "florida": "FL", "georgia": "GA",
-    "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA",
-    "kansas": "KS", "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
-    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS", "missouri": "MO",
-    "montana": "MT", "nebraska": "NE", "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ",
-    "new mexico": "NM", "new york": "NY", "north carolina": "NC", "north dakota": "ND", "ohio": "OH",
-    "oklahoma": "OK", "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI",
-    "south carolina": "SC", "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
-    "vermont": "VT", "virginia": "VA", "washington": "WA", "west virginia": "WV", "wisconsin": "WI",
-    "wyoming": "WY", "district of columbia": "DC"
-}
-US_STATE_CODES = set(US_STATE_NAME_TO_CODE.values())
-
-def parse_city_region(raw: str):
-    s = (raw or "").strip()
-    if not s:
-        return ("", None)
-    parts = [p.strip() for p in s.split(",") if p.strip()]
-    if len(parts) >= 2:
-        city = parts[0]
-        region = parts[1]
-    else:
-        tokens = s.split()
-        if len(tokens) >= 2:
-            city = " ".join(tokens[:-1])
-            region = tokens[-1]
-        else:
-            return (s, None)
-
-    r = region.strip().lower()
-    if r in US_STATE_NAME_TO_CODE:
-        return (city.strip(), US_STATE_NAME_TO_CODE[r])
-    r2 = region.strip().upper()
-    if len(r2) == 2 and r2 in US_STATE_CODES:
-        return (city.strip(), r2)
-    return (s, None)
 
 def find_airports(query: str, limit: int = 12) -> list[dict]:
     q = (query or "").strip()
     if not q:
         return []
 
-    q_up = normalize(q)
+    q_up = re.sub(r"\s+", " ", q.strip()).upper()
 
-    # ICAO
+    # ICAO exact
     if len(q_up) == 4 and q_up in AIRPORTS:
         return [get_airport_by_icao(q_up)]
 
@@ -145,11 +129,11 @@ def find_airports(query: str, limit: int = 12) -> list[dict]:
             if (a.get("iata") or "").upper() == q_up:
                 hits.append(airport_to_choice(icao, a))
         if hits:
+            hits.sort(key=lambda c: (0 if c["iata"] else 1, c["icao"]))
             return hits[:limit]
 
-    city_query, st = parse_city_region(q)
-    q_low = city_query.lower().strip()
-
+    # fallback: US name/city contains
+    q_low = q.lower().strip()
     found = []
     for icao, a in AIRPORTS.items():
         if (a.get("country") or "").upper() != "US":
@@ -157,34 +141,18 @@ def find_airports(query: str, limit: int = 12) -> list[dict]:
         name = (a.get("name") or "").lower()
         city = (a.get("city") or "").lower()
         if q_low and (q_low in name or q_low in city):
-            if st:
-                region = (a.get("region") or "").upper()  # often US-XX
-                if region.startswith("US-") and not region.endswith(st):
-                    continue
             found.append(airport_to_choice(icao, a))
 
     found.sort(key=lambda c: (0 if c["iata"] else 1, c["icao"]))
     return found[:limit]
 
+
 # ------------------ Winds aloft (FD) ------------------
 def choose_fcst_hours(depart_dt_local: str | None) -> int:
-    """
-    Accepts either:
-      - 'YYYY-MM-DD' (date-only)
-      - 'YYYY-MM-DDTHH:MM' (datetime-local)
-    For date-only, assume local noon so it's not treated as "already in the past".
-    """
     if not depart_dt_local:
         return 12
     try:
-        s = depart_dt_local.strip()
-
-        # Date-only -> assume 12:00 local
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
-            dt = datetime.fromisoformat(s + "T12:00")
-        else:
-            dt = datetime.fromisoformat(s)
-
+        dt = datetime.fromisoformat(depart_dt_local)
         now = datetime.now()
         hours_ahead = (dt - now).total_seconds() / 3600.0
         if hours_ahead <= 6:
@@ -195,6 +163,7 @@ def choose_fcst_hours(depart_dt_local: str | None) -> int:
     except Exception:
         return 12
 
+
 def fetch_windtemp_text(fcst_hours: int) -> str:
     params = {
         "region": WINDS_REGION,
@@ -203,10 +172,11 @@ def fetch_windtemp_text(fcst_hours: int) -> str:
         "layout": WINDS_LAYOUT,
     }
     url = "https://www.aviationweather.gov/api/data/windtemp?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers={"User-Agent": "tbm-trip-planner/1.1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "tbm-trip-planner/1.0"})
     ctx = ssl.create_default_context(cafile=certifi.where())
     with urllib.request.urlopen(req, timeout=12, context=ctx) as resp:
         return resp.read().decode("utf-8", errors="replace")
+
 
 def build_windtemp_index(raw_text: str):
     lines = [ln.rstrip() for ln in raw_text.splitlines() if ln.strip()]
@@ -240,10 +210,12 @@ def build_windtemp_index(raw_text: str):
         station_map[st] = groups[:len(alts)]
     return alts, station_map
 
+
 def parse_fd_group(group: str):
     g = group.strip()
     if not g or "////" in g:
         return (None, None)
+
     if g.startswith("99"):  # light/variable
         return (None, 0.0)
 
@@ -258,12 +230,12 @@ def parse_fd_group(group: str):
         dd = int(m.group(1))
         ff = int(m.group(2))
 
-    # 51-86 indicates 100+ kt
     if dd >= 51:
         dd -= 50
         ff += 100
 
     return (dd * 10.0, float(ff))
+
 
 def iata_to_latlon(iata: str):
     iata = (iata or "").upper()
@@ -278,11 +250,8 @@ def iata_to_latlon(iata: str):
             return (float(lat), float(lon))
     return None
 
+
 def wind_component_at_point_fl270(point_lat: float, point_lon: float, course_deg: float, alts: list[int], station_map: dict):
-    """
-    Returns (component_kt, station, from_deg, speed_kt)
-    component_kt: + tailwind, - headwind along course_deg
-    """
     if 24000 not in alts or 30000 not in alts:
         return (0.0, "N/A", None, None)
 
@@ -313,7 +282,6 @@ def wind_component_at_point_fl270(point_lat: float, point_lon: float, course_deg
     if not chosen:
         return (0.0, "N/A", None, None)
 
-    # from-direction/speed -> "toward" u/v (east/north)
     def to_uv(dir_from_deg: float, speed: float):
         th = radians(dir_from_deg)
         u = -speed * sin(th)  # east (toward)
@@ -323,7 +291,6 @@ def wind_component_at_point_fl270(point_lat: float, point_lon: float, course_deg
     u24, v24 = to_uv(d24, s24)
     u30, v30 = to_uv(d30, s30)
 
-    # interpolate to FL270 (midway between 24k and 30k)
     u27 = (u24 + u30) / 2.0
     v27 = (v24 + v30) / 2.0
 
@@ -334,7 +301,7 @@ def wind_component_at_point_fl270(point_lat: float, point_lon: float, course_deg
     crs_e = sin(br)
     crs_n = cos(br)
 
-    component = wt_e * crs_e + wt_n * crs_n
+    component = wt_e * crs_e + wt_n * crs_n  # + tailwind, - headwind
 
     speed = sqrt(wt_e * wt_e + wt_n * wt_n)
     toward_deg = (degrees(atan2(wt_e, wt_n)) + 360) % 360
@@ -342,11 +309,8 @@ def wind_component_at_point_fl270(point_lat: float, point_lon: float, course_deg
 
     return (component, chosen, from_deg, speed)
 
+
 def wind_component_fl270_kts(dep: dict, dest: dict, depart_dt_local: str | None):
-    """
-    Returns (component_kt, details_str)
-    component_kt positive = tailwind, negative = headwind
-    """
     lat1, lon1 = float(dep["lat"]), float(dep["lon"])
     lat2, lon2 = float(dest["lat"]), float(dest["lon"])
 
@@ -359,7 +323,6 @@ def wind_component_fl270_kts(dep: dict, dest: dict, depart_dt_local: str | None)
 
     course = initial_bearing_deg(lat1, lon1, lat2, lon2)
 
-    # sample dep/mid/dest and average
     dep_lat, dep_lon = lat1, lon1
     mid_lat, mid_lon = (lat1 + lat2) / 2.0, (lon1 + lon2) / 2.0
     dest_lat, dest_lon = lat2, lon2
@@ -368,7 +331,7 @@ def wind_component_fl270_kts(dep: dict, dest: dict, depart_dt_local: str | None)
     c2, s2, f2, sp2 = wind_component_at_point_fl270(mid_lat, mid_lon, course, alts, station_map)
     c3, s3, f3, sp3 = wind_component_at_point_fl270(dest_lat, dest_lon, course, alts, station_map)
 
-    comps = [c for c in (c1, c2, c3) if c is not None]
+    comps = [c for c in [c1, c2, c3] if c is not None]
     component = sum(comps) / len(comps) if comps else 0.0
 
     def fmt_station(st, fdeg, spd):
@@ -382,11 +345,14 @@ def wind_component_fl270_kts(dep: dict, dest: dict, depart_dt_local: str | None)
         f"Mid:{fmt_station(s2, f2, sp2)}  "
         f"Dest:{fmt_station(s3, f3, sp3)}"
     )
+
     return (component, details)
 
-# ------------------ Costing helpers ------------------
+
+# ------------------ Core estimating ------------------
 def money(x: float) -> str:
     return f"${x:,.0f}"
+
 
 def costs_for_minutes(total_min: int):
     hours = total_min / 60.0
@@ -396,10 +362,24 @@ def costs_for_minutes(total_min: int):
     fuel_gal = FUEL_BURN_GPH * hours
     fuel = fuel_gal * FUEL_PRICE_PER_GAL
     total = mgmt + maint + eng + fuel
-    return hours, mgmt, maint, eng, fuel_gal, fuel, total
+    return {
+        "hours": hours,
+        "mgmt": mgmt,
+        "maint": maint,
+        "engine": eng,
+        "fuel_gal": fuel_gal,
+        "fuel": fuel,
+        "total": total,
+    }
 
-def compute_leg(dep: dict, dest: dict, depart_dt_local: str | None):
+
+def estimate_leg(dep_icao: str, dest_icao: str, depart_dt_local: str | None):
+    dep = get_airport_by_icao(dep_icao)
+    dest = get_airport_by_icao(dest_icao)
+
     dist_nm = haversine_nm(float(dep["lat"]), float(dep["lon"]), float(dest["lat"]), float(dest["lon"]))
+    course = initial_bearing_deg(float(dep["lat"]), float(dep["lon"]), float(dest["lat"]), float(dest["lon"]))
+
     wind_component, wind_details = wind_component_fl270_kts(dep, dest, depart_dt_local)
 
     # Typical
@@ -407,54 +387,111 @@ def compute_leg(dep: dict, dest: dict, depart_dt_local: str | None):
     gs_typ = max(60, TAS_TYPICAL + wind_component)
     cruise_min_typ = int(round((dist_typ / gs_typ) * 60))
     total_min_typ = cruise_min_typ + OVERHEAD_TYPICAL_MIN
-    _, mg_t, ma_t, en_t, _, fu_t, tot_t = costs_for_minutes(total_min_typ)
 
     # Conservative
     dist_con = dist_nm * ROUTING_CONSERVATIVE
     gs_con = max(60, TAS_CONSERVATIVE + wind_component)
     cruise_min_con = int(round((dist_con / gs_con) * 60))
     total_min_con = cruise_min_con + OVERHEAD_CONSERVATIVE_MIN
-    _, mg_c, ma_c, en_c, _, fu_c, tot_c = costs_for_minutes(total_min_con)
-
-    wind_sign = "+" if wind_component >= 0 else "−"
-    wind_abs = abs(int(round(wind_component)))
 
     return {
+        "from": dep_icao,
+        "to": dest_icao,
         "from_pretty": pretty_airport(dep),
         "to_pretty": pretty_airport(dest),
-        "dist_nm": int(round(dist_nm)),
-        "wind_sign": wind_sign,
-        "wind_abs": wind_abs,
-        "wind_details": wind_details,
-        "typ": {
-            "gs": int(round(gs_typ)),
-            "time": format_hhmm(total_min_typ),
-            "minutes": total_min_typ,
-            "cost_raw": float(tot_t),
-            "cost": money(tot_t),
-            "mgmt": money(mg_t),
-            "maint": money(ma_t),
-            "eng": money(en_t),
-            "fuel": money(fu_t),
+        "distance_nm": int(round(dist_nm)),
+        "course_deg": int(round(course)),
+        "winds": {
+            "component_kt": float(wind_component),
+            "details": wind_details,
         },
-        "con": {
-            "gs": int(round(gs_con)),
-            "time": format_hhmm(total_min_con),
-            "minutes": total_min_con,
-            "cost_raw": float(tot_c),
-            "cost": money(tot_c),
-            "mgmt": money(mg_c),
-            "maint": money(ma_c),
-            "eng": money(en_c),
-            "fuel": money(fu_c),
+        "typical": {
+            "tas_kt": TAS_TYPICAL,
+            "gs_kt": int(round(gs_typ)),
+            "minutes": int(total_min_typ),
+            "block_time": format_hhmm(int(total_min_typ)),
+            "costs": costs_for_minutes(int(total_min_typ)),
         },
-        "dep_lat": float(dep["lat"]),
-        "dep_lon": float(dep["lon"]),
-        "dest_lat": float(dest["lat"]),
-        "dest_lon": float(dest["lon"]),
+        "conservative": {
+            "tas_kt": TAS_CONSERVATIVE,
+            "gs_kt": int(round(gs_con)),
+            "minutes": int(total_min_con),
+            "block_time": format_hhmm(int(total_min_con)),
+            "costs": costs_for_minutes(int(total_min_con)),
+        },
     }
 
-# ------------------ API ------------------
+
+def parse_date_only(s: str | None) -> date | None:
+    if not s:
+        return None
+    s = s.strip()
+
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+        try:
+            return date.fromisoformat(s)
+        except Exception:
+            return None
+
+    low = s.lower()
+    today = date.today()
+    if "tomorrow" in low:
+        return today + timedelta(days=1)
+    if "today" in low:
+        return today
+    return None
+
+
+def make_depart_dt_for_winds(d: date | None) -> str | None:
+    if not d:
+        return None
+    return f"{d.isoformat()}T12:00"
+
+
+def estimate_trip(dep: str, dest: str, trip_type: str, depart_date: date, return_date: date | None):
+    depart_dt = make_depart_dt_for_winds(depart_date)
+    legs = [estimate_leg(dep, dest, depart_dt)]
+
+    return_dt = None
+    if trip_type == "roundtrip":
+        if not return_date:
+            return_date = depart_date + timedelta(days=1)
+        return_dt = make_depart_dt_for_winds(return_date)
+        legs.append(estimate_leg(dest, dep, return_dt))
+
+    def totals_for(which: str):
+        minutes = sum(int(leg[which]["minutes"]) for leg in legs)
+        costs = {
+            "mgmt": sum(float(leg[which]["costs"]["mgmt"]) for leg in legs),
+            "maint": sum(float(leg[which]["costs"]["maint"]) for leg in legs),
+            "engine": sum(float(leg[which]["costs"]["engine"]) for leg in legs),
+            "fuel_gal": sum(float(leg[which]["costs"]["fuel_gal"]) for leg in legs),
+            "fuel": sum(float(leg[which]["costs"]["fuel"]) for leg in legs),
+            "total": sum(float(leg[which]["costs"]["total"]) for leg in legs),
+        }
+        return {"minutes": minutes, "block_time": format_hhmm(minutes), "costs": costs}
+
+    return {
+        "app": APP_NAME,
+        "inputs": {
+            "dep": dep,
+            "dest": dest,
+            "trip_type": trip_type,
+            "depart_date": depart_date.isoformat(),
+            "return_date": return_date.isoformat() if return_date else None,
+            "depart_dt": depart_dt,
+            "return_dt": return_dt,
+        },
+        "legs": legs,
+        "totals": {
+            "typical": totals_for("typical"),
+            "conservative": totals_for("conservative"),
+        },
+        "winds_outbound": legs[0]["winds"],
+    }
+
+
+# ------------------ API: airports search ------------------
 @app.get("/api/airports")
 def api_airports():
     q = (request.args.get("q") or "").strip()
@@ -464,67 +501,267 @@ def api_airports():
     payload = [{"icao": c["icao"], "label": pretty_airport(c)} for c in choices]
     return jsonify(payload)
 
-# ------------------ UI ------------------
+
+# ------------------ API: estimate (machine-readable) ------------------
+@app.post("/api/estimate")
+def api_estimate():
+    data = request.get_json(silent=True) or {}
+
+    dep = (data.get("dep") or "").strip().upper()
+    dest = (data.get("dest") or "").strip().upper()
+    trip_type_raw = (data.get("trip_type") or "oneway").strip().lower()
+    trip_type = "roundtrip" if trip_type_raw in ("roundtrip", "round_trip", "rt") else "oneway"
+
+    depart_date = parse_date_only(data.get("depart_date"))
+    return_date = parse_date_only(data.get("return_date"))
+
+    if dep not in AIRPORTS:
+        return jsonify({"error": f"Unknown departure airport: {dep}"}), 400
+    if dest not in AIRPORTS:
+        return jsonify({"error": f"Unknown destination airport: {dest}"}), 400
+    if not depart_date:
+        return jsonify({"error": "depart_date required (YYYY-MM-DD, today, or tomorrow)"}), 400
+
+    est = estimate_trip(dep, dest, trip_type, depart_date, return_date)
+    return jsonify(est)
+
+
+# ------------------ UI: pages ------------------
 @app.get("/")
 def home():
     return render_template("home.html")
 
-def _resolve_selected_airport(icao_from_hidden: str, fallback_query: str) -> dict | None:
-    icao = (icao_from_hidden or "").strip().upper()
-    if icao and len(icao) == 4 and icao in AIRPORTS:
-        return get_airport_by_icao(icao)
 
-    # fallback: try to resolve from text (ICAO/IATA/city)
-    hits = find_airports(fallback_query or "", limit=1)
-    if hits:
-        return hits[0]
-    return None
+@app.get("/chat")
+def chat_page():
+    return render_template("chat.html")
 
-@app.post("/start")
-@app.post("/estimate")  # optional alias
-def start():
-    trip_type = (request.form.get("trip_type") or "oneway").strip().lower()
-    is_roundtrip = trip_type == "roundtrip"
 
-    dep = _resolve_selected_airport(request.form.get("dep_icao", ""), request.form.get("dep_query", ""))
-    dest = _resolve_selected_airport(request.form.get("dest_icao", ""), request.form.get("dest_query", ""))
+@app.post("/estimate")
+def estimate_page():
+    dep_icao = (request.form.get("dep_icao") or "").strip().upper()
+    dest_icao = (request.form.get("dest_icao") or "").strip().upper()
+    trip_type_raw = (request.form.get("trip_type") or "oneway").strip().lower()
+    trip_type = "roundtrip" if trip_type_raw == "roundtrip" else "oneway"
 
-    if not dep or not dest:
-        return '<p>Could not resolve airports. <a href="/">Start over</a></p>'
+    depart_date = parse_date_only(request.form.get("depart_date"))
+    return_date = parse_date_only(request.form.get("return_date"))
 
-    depart_dt = (request.form.get("depart_dt") or "").strip() or None
-    return_dt = (request.form.get("return_dt") or "").strip() or None
+    if dep_icao not in AIRPORTS or dest_icao not in AIRPORTS or not depart_date:
+        return render_template("home.html", error="Please pick valid airports and a departure date.")
 
-    legs = []
-    legs.append(compute_leg(dep, dest, depart_dt))
+    est = estimate_trip(dep_icao, dest_icao, trip_type, depart_date, return_date)
+    legs = est["legs"]
 
-    if is_roundtrip:
-        legs.append(compute_leg(dest, dep, return_dt))
+    total_time_typ = est["totals"]["typical"]["block_time"]
+    total_cost_typ = money(float(est["totals"]["typical"]["costs"]["total"]))
+    total_time_con = est["totals"]["conservative"]["block_time"]
+    total_cost_con = money(float(est["totals"]["conservative"]["costs"]["total"]))
 
-    total_typ_minutes = sum(leg["typ"]["minutes"] for leg in legs)
-    total_con_minutes = sum(leg["con"]["minutes"] for leg in legs)
-
-    total_typ_cost_raw = sum(leg["typ"]["cost_raw"] for leg in legs)
-    total_con_cost_raw = sum(leg["con"]["cost_raw"] for leg in legs)
-
-    trip_label = "Round trip" if is_roundtrip else "One way"
-
-    # Map: show the main city-pair (dep <-> dest)
     return render_template(
         "estimate.html",
-        trip_label=trip_label,
+        app_name=APP_NAME,
+        trip_type=trip_type,
+        depart_date=depart_date.isoformat(),
+        return_date=(return_date.isoformat() if return_date else None),
+        dep_pretty=legs[0]["from_pretty"],
+        dest_pretty=legs[0]["to_pretty"],
         legs=legs,
-
-        total_typ_time=format_hhmm(int(round(total_typ_minutes))),
-        total_con_time=format_hhmm(int(round(total_con_minutes))),
-        total_typ_cost=money(total_typ_cost_raw),
-        total_con_cost=money(total_con_cost_raw),
-
-        dep_lat=legs[0]["dep_lat"],
-        dep_lon=legs[0]["dep_lon"],
-        dest_lat=legs[0]["dest_lat"],
-        dest_lon=legs[0]["dest_lon"],
+        total_time_typ=total_time_typ,
+        total_cost_typ=total_cost_typ,
+        total_time_con=total_time_con,
+        total_cost_con=total_cost_con,
+        fuel_burn_gph=FUEL_BURN_GPH,
+        fuel_price=f"{FUEL_PRICE_PER_GAL:.2f}",
+        routing_typ_pct=int(round((ROUTING_TYPICAL - 1) * 100)),
+        routing_con_pct=int(round((ROUTING_CONSERVATIVE - 1) * 100)),
+        overhead_typ_min=OVERHEAD_TYPICAL_MIN,
+        overhead_con_min=OVERHEAD_CONSERVATIVE_MIN,
     )
+
+
+# ------------------ Chatbot (Option B: tool-calling, but conversational tone) ------------------
+def _has_openai() -> bool:
+    return OpenAI is not None and bool(os.getenv("OPENAI_API_KEY"))
+
+
+def _tool_estimate_trip(dep: str, dest: str, trip_type: str, depart_date: str, return_date: str | None = None):
+    dep = (dep or "").strip().upper()
+    dest = (dest or "").strip().upper()
+    trip_type = (trip_type or "oneway").strip().lower()
+    trip_type = "roundtrip" if trip_type in ("roundtrip", "round_trip", "rt") else "oneway"
+
+    d1 = parse_date_only(depart_date)
+    d2 = parse_date_only(return_date) if return_date else None
+
+    if dep not in AIRPORTS:
+        return {"error": f"Unknown departure airport: {dep}"}
+    if dest not in AIRPORTS:
+        return {"error": f"Unknown destination airport: {dest}"}
+    if not d1:
+        return {"error": "depart_date must be YYYY-MM-DD or today/tomorrow"}
+
+    return estimate_trip(dep, dest, trip_type, d1, d2)
+
+
+def _tool_search_airports(query: str):
+    choices = find_airports(query or "", limit=8)
+    return [{"icao": c["icao"], "label": pretty_airport(c)} for c in choices]
+
+
+def _clean_text(s: str) -> str:
+    """Strip common markdown-ish formatting so it reads more like normal chat."""
+    if not s:
+        return ""
+    s = s.replace("**", "").replace("__", "")
+    # Remove leading bullet markers
+    s = re.sub(r"(?m)^\s*[-*]\s+", "", s)
+    # Collapse extra blank lines
+    s = re.sub(r"\n{3,}", "\n\n", s).strip()
+    return s
+
+
+@app.post("/api/chat")
+def api_chat():
+    data = request.get_json(silent=True) or {}
+    msg = (data.get("message") or "").strip()
+
+    if not msg:
+        return jsonify({"reply": "Tell me something like: how much to fly from KCAK to KSRQ tomorrow?"}), 200
+
+    # If key/library missing, still return something useful (and conversational)
+    if not _has_openai():
+        codes = re.findall(r"\bK[A-Z0-9]{3}\b", msg.upper())
+        if len(codes) < 2:
+            return jsonify({"reply": "Give me two airport codes like KCAK and KSRQ, plus a date (today/tomorrow works)."}), 200
+
+        dep, dest = codes[0], codes[1]
+        trip_type = "roundtrip" if "round" in msg.lower() else "oneway"
+        d = parse_date_only(msg) or (date.today() + timedelta(days=1))
+
+        est = estimate_trip(dep, dest, trip_type, d, None)
+        typical_total = float(est["totals"]["typical"]["costs"]["total"])
+        typical_time = est["totals"]["typical"]["block_time"]
+
+        reply = f"For {dep} to {dest} on {d.isoformat()}, you’re roughly looking at {money(typical_total)} and about {typical_time} block time (typical case)."
+        return jsonify({"reply": reply, "estimation": est}), 200
+
+    # OpenAI tool-calling
+    client = OpenAI()
+    model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "estimate_trip",
+                "description": "Estimate TBM trip costs/time given airports + dates.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "dep": {"type": "string", "description": "Departure ICAO like KCAK"},
+                        "dest": {"type": "string", "description": "Destination ICAO like KSRQ"},
+                        "trip_type": {"type": "string", "enum": ["oneway", "roundtrip"]},
+                        "depart_date": {"type": "string", "description": "YYYY-MM-DD or today/tomorrow"},
+                        "return_date": {"type": ["string", "null"], "description": "YYYY-MM-DD or today/tomorrow or null"},
+                    },
+                    "required": ["dep", "dest", "trip_type", "depart_date"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_airports",
+                "description": "Search airports by text (city/name/code). Returns a short list of options.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    ]
+
+    system = (
+        f"You are the chat assistant inside {APP_NAME}.\n"
+        "Talk like ChatGPT: natural, friendly, plain text.\n"
+        "Avoid markdown, bullet lists, and heavy formatting.\n"
+        "When the user asks about cost/time for a trip, call estimate_trip.\n"
+        "If the user gives a city/name instead of ICAO codes, call search_airports and then ask which ICAO they mean.\n"
+        "Keep answers short unless the user asks for details.\n"
+    )
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": msg},
+    ]
+
+    try:
+        for _ in range(3):
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+            )
+
+            m = completion.choices[0].message
+
+            # Normal assistant response (no tool calls)
+            if not getattr(m, "tool_calls", None):
+                reply = _clean_text((m.content or "").strip())
+                if not reply:
+                    reply = "I can help—what are the two ICAO airports (like KCAK and KSRQ) and what day are you flying?"
+                return jsonify({"reply": reply}), 200
+
+            # Append the assistant tool call message
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": m.content or "",
+                    "tool_calls": [tc.model_dump() for tc in m.tool_calls],
+                }
+            )
+
+            # Execute tools
+            for tc in m.tool_calls:
+                name = tc.function.name
+                args_str = tc.function.arguments or "{}"
+                try:
+                    args = json.loads(args_str)
+                except Exception:
+                    args = {}
+
+                if name == "estimate_trip":
+                    result = _tool_estimate_trip(
+                        dep=args.get("dep", ""),
+                        dest=args.get("dest", ""),
+                        trip_type=args.get("trip_type", "oneway"),
+                        depart_date=args.get("depart_date", ""),
+                        return_date=args.get("return_date"),
+                    )
+                elif name == "search_airports":
+                    result = _tool_search_airports(query=args.get("query", ""))
+                else:
+                    result = {"error": f"Unknown tool: {name}"}
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": json.dumps(result),
+                    }
+                )
+
+        return jsonify({"reply": "I got stuck—try again with two ICAO codes and a date (today/tomorrow works)."}), 200
+
+    except Exception as e:
+        # IMPORTANT: return JSON so your UI doesn't choke
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=5050, use_reloader=False)

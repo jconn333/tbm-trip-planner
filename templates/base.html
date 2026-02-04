@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}TBM Trip Planner{% endblock %}</title>
 
-    <!-- Tailwind (no build step, great for fast local iteration) -->
+    <!-- Tailwind (no build step, great for fast iteration) -->
     <script src="https://cdn.tailwindcss.com"></script>
 
     <style>
@@ -26,8 +26,13 @@
             <div class="text-xs text-slate-400">Planning estimates for partner trips</div>
           </div>
         </div>
-        <div class="text-xs text-slate-400">
-          Not for operational flight planning
+
+        <div class="flex items-center gap-4 text-sm">
+          <a href="/" class="text-slate-300 hover:text-white transition">Planner</a>
+          <a href="/chat" class="text-slate-300 hover:text-white transition">Chat</a>
+          <div class="hidden sm:block text-xs text-slate-500">
+            Not for operational flight planning
+          </div>
         </div>
       </div>
     </header>
