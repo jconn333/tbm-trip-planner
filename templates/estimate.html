@@ -1,148 +1,1119 @@
-{% extends "base.html" %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{{ app_name }} — Estimate</title>
 
-{% block title %}Estimate · TBM Trip Planner{% endblock %}
+  <!-- Leaflet (route map) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
-{% block content %}
-<div class="max-w-5xl mx-auto space-y-8">
+  <style>
+    :root{
+      --bg: #0b1220;
+      --panel: rgba(255,255,255,0.06);
+      --panel2: rgba(255,255,255,0.08);
+      --stroke: rgba(255,255,255,0.12);
+      --text: rgba(255,255,255,0.92);
+      --muted: rgba(255,255,255,0.65);
+      --muted2: rgba(255,255,255,0.52);
+      --shadow: 0 16px 44px rgba(0,0,0,0.42);
+      --accent: #6ea8fe;
+      --accent2: #7cf2c2;
+      --danger: #ff5c70;
+      --ok: #7cf2c2;
+      --warn: #ffd166;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --radius: 18px;
+    }
 
-  <!-- Header -->
-  <div>
-    <h1 class="text-3xl font-semibold">Estimate</h1>
-    <p class="text-slate-400 mt-1">{{ trip_label }}</p>
-  </div>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
 
-  <!-- Total summary -->
-  <div class="rounded-2xl bg-slate-900 border border-slate-800 p-6">
-    <div class="grid md:grid-cols-2 gap-6">
-      <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-5">
-        <div class="text-sm text-slate-400">Typical (total)</div>
-        <div class="mt-1 text-3xl font-semibold">{{ total_typ_cost }}</div>
-        <div class="mt-2 text-sm text-slate-400">Estimated time: <span class="text-slate-200 font-medium">{{ total_typ_time }}</span></div>
+    body{
+      margin:0;
+      font-family: var(--sans);
+      color: var(--text);
+      background:
+        radial-gradient(1200px 540px at 16% 12%, rgba(110,168,254,0.18), transparent 60%),
+        radial-gradient(900px 520px at 82% 26%, rgba(124,242,194,0.14), transparent 60%),
+        radial-gradient(900px 680px at 50% 100%, rgba(255,255,255,0.05), transparent 70%),
+        var(--bg);
+    }
+
+    .wrap{
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 26px 16px 66px;
+    }
+
+    .topbar{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .brand{ display:flex; align-items:center; gap: 12px; }
+    .logo{
+      width: 38px; height: 38px; border-radius: 14px;
+      background: linear-gradient(135deg, rgba(110,168,254,0.95), rgba(124,242,194,0.88));
+      box-shadow: 0 10px 24px rgba(110,168,254,0.18);
+      flex: 0 0 auto;
+    }
+    .brand h1{ margin:0; font-size: 17px; letter-spacing: 0.2px; line-height: 1.2; }
+    .brand .sub{ margin-top: 3px; font-size: 12.5px; color: var(--muted); }
+    .badge{
+      display:inline-flex; align-items:center; gap: 8px;
+      padding: 8px 11px; border-radius: 999px;
+      border: 1px solid var(--stroke);
+      background: rgba(255,255,255,0.05);
+      color: var(--muted); font-size: 12.5px; white-space: nowrap;
+      height: fit-content;
+    }
+    .dot{ width: 8px; height: 8px; border-radius: 99px; background: var(--ok); display:inline-block; }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1.08fr 0.92fr;
+      gap: 14px;
+    }
+    @media (max-width: 980px){
+      .grid{ grid-template-columns: 1fr; }
+    }
+
+    .card{
+      background: linear-gradient(180deg, var(--panel), rgba(255,255,255,0.045));
+      border: 1px solid var(--stroke);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .cardHeader{
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: rgba(0,0,0,0.10);
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 12px;
+    }
+    .cardHeader h2{ margin: 0; font-size: 14px; letter-spacing: 0.2px; }
+    .cardHeader p{ margin: 6px 0 0; color: var(--muted); font-size: 12.8px; line-height: 1.35; }
+    .cardBody{ padding: 16px; }
+
+    .row2{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 560px){
+      .row2{ grid-template-columns: 1fr; }
+    }
+
+    .pillRow{ display:flex; flex-wrap: wrap; gap: 8px; align-items:center; }
+    .pill{
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.05);
+      color: var(--muted);
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 12.5px;
+      user-select: none;
+    }
+    .pill strong{ color: var(--text); font-weight: 650; }
+
+    .toggle{
+      display:inline-flex;
+      align-items:center;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.05);
+      border-radius: 999px;
+      overflow:hidden;
+    }
+    .toggle button{
+      border:0;
+      background: transparent;
+      color: var(--muted);
+      padding: 8px 11px;
+      cursor:pointer;
+      font-size: 12.5px;
+      font-weight: 650;
+    }
+    .toggle button.active{
+      color: #0b1220;
+      background: linear-gradient(135deg, rgba(110,168,254,0.92), rgba(124,242,194,0.50));
+    }
+
+    .bigSummary{
+      padding: 12px 12px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.045);
+      line-height: 1.35;
+      font-size: 14px;
+    }
+    .bigSummary .muted{ color: var(--muted); font-size: 12.8px; margin-top: 6px; }
+
+    .kpis{
+      display:grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 12px;
+    }
+    @media (max-width: 560px){
+      .kpis{ grid-template-columns: 1fr; }
+    }
+    .kpi{
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      padding: 10px 12px;
+    }
+    .kpi .label{ color: var(--muted); font-size: 12px; }
+    .kpi .value{ font-size: 18px; font-weight: 750; margin-top: 4px; letter-spacing: 0.2px; }
+    .kpi .sub{ color: var(--muted2); font-size: 12px; margin-top: 4px; }
+
+    /* Map */
+    #map{
+      height: 340px;
+      border-radius: 16px;
+      overflow:hidden;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.03);
+    }
+
+    /* Winds viz */
+    .windBox{
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      padding: 12px;
+    }
+    .windTop{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .windVal{
+      font-size: 18px;
+      font-weight: 750;
+      letter-spacing: 0.2px;
+    }
+    .windVal small{ font-weight: 650; font-size: 12.5px; color: var(--muted); margin-left: 6px; }
+    .windBar{
+      margin-top: 10px;
+      height: 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.10);
+      position: relative;
+      overflow:hidden;
+    }
+    .windCenter{
+      position:absolute; left: 50%; top: 0; bottom: 0;
+      width: 2px;
+      background: rgba(255,255,255,0.25);
+    }
+    .windFill{
+      position:absolute; top: 0; bottom: 0;
+      width: 0%;
+      background: rgba(255,255,255,0.20);
+    }
+    .windFill.tail{ background: rgba(124,242,194,0.35); }
+    .windFill.head{ background: rgba(255,92,112,0.28); }
+
+    .windMeta{
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12.5px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+    }
+
+    /* Cost breakdown */
+    .costGrid{
+      display:grid;
+      grid-template-columns: 0.95fr 1.05fr;
+      gap: 12px;
+      align-items:center;
+    }
+    @media (max-width: 560px){
+      .costGrid{ grid-template-columns: 1fr; }
+    }
+
+    .donutWrap{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      padding: 10px;
+      min-height: 210px;
+    }
+    .legend{
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      padding: 12px;
+    }
+    .legendRow{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      padding: 9px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      font-size: 13.5px;
+    }
+    .legendRow:last-child{ border-bottom: 0; }
+    .legendLeft{ display:flex; align-items:center; gap: 10px; color: var(--muted); }
+    .swatch{ width: 12px; height: 12px; border-radius: 4px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.14); }
+    .legendVal{ font-weight: 700; }
+
+    .micro{ color: var(--muted2); font-size: 12px; line-height: 1.35; }
+
+    /* Legs */
+    .legs{
+      margin-top: 12px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      overflow:hidden;
+    }
+    .legRow{
+      padding: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+    }
+    .legRow:last-child{ border-bottom: 0; }
+    .legTop{
+      display:flex;
+      align-items:baseline;
+      justify-content:space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .legTitle{ font-weight: 800; letter-spacing: 0.2px; }
+    .legMeta{ color: var(--muted); font-size: 12.5px; margin-top: 6px; line-height: 1.35; }
+    .legNums{ display:flex; gap: 12px; flex-wrap: wrap; }
+    .tag{
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.05);
+      color: var(--muted);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12.5px;
+    }
+    .tag strong{ color: var(--text); font-weight: 750; }
+
+    /* Follow-up chat */
+    .chatThread{
+      height: 260px;
+      overflow:auto;
+      padding: 12px;
+      background: rgba(255,255,255,0.035);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 16px;
+    }
+    .bubbleRow{
+      display:flex;
+      margin: 9px 0;
+      gap: 10px;
+    }
+    .bubbleRow.me{ justify-content: flex-end; }
+    .bubble{
+      max-width: 86%;
+      border-radius: 16px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,0.10);
+      white-space: pre-wrap;
+      line-height: 1.35;
+      font-size: 14px;
+    }
+    .bubble.me{ background: rgba(255,255,255,0.085); }
+    .bubble.ai{
+      background: rgba(110,168,254,0.09);
+      border-color: rgba(110,168,254,0.20);
+    }
+
+    .chatForm{
+      display:flex;
+      gap: 10px;
+      margin-top: 10px;
+      align-items: flex-end;
+    }
+    textarea{
+      width: 100%;
+      padding: 11px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      outline: none;
+      font-size: 14px;
+      min-height: 44px;
+      max-height: 120px;
+      resize: none;
+    }
+    textarea:focus{
+      border-color: rgba(110,168,254,0.55);
+      box-shadow: 0 0 0 4px rgba(110,168,254,0.12);
+    }
+
+    .btn{
+      appearance:none;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.08);
+      color: var(--text);
+      padding: 10px 13px;
+      border-radius: 14px;
+      cursor: pointer;
+      font-weight: 650;
+      font-size: 13.5px;
+      letter-spacing: 0.15px;
+      white-space: nowrap;
+    }
+    .btn:hover{ background: rgba(255,255,255,0.11); }
+    .btn:disabled{ opacity: 0.55; cursor: not-allowed; }
+
+    .btnPrimary{
+      border: 1px solid rgba(110,168,254,0.62);
+      background: linear-gradient(135deg, rgba(110,168,254,0.92), rgba(124,242,194,0.50));
+      color: #0b1220;
+      box-shadow: 0 10px 20px rgba(110,168,254,0.14);
+    }
+
+    .chips{ display:flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .chip{
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.05);
+      color: var(--muted);
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 12.5px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .chip:hover{ background: rgba(255,255,255,0.08); color: var(--text); }
+
+    .status{
+      margin-top: 8px;
+      font-size: 12.5px;
+      color: var(--muted);
+      min-height: 18px;
+    }
+
+    .typing{
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .dots{ display:inline-flex; gap: 3px; align-items:center; }
+    .dotB{
+      width: 6px; height: 6px; border-radius: 99px;
+      background: rgba(255,255,255,0.55);
+      animation: bounce 1.2s infinite ease-in-out;
+    }
+    .dotB:nth-child(2){ animation-delay: 0.15s; }
+    .dotB:nth-child(3){ animation-delay: 0.30s; }
+    @keyframes bounce{
+      0%, 80%, 100%{ transform: translateY(0); opacity: 0.55; }
+      40%{ transform: translateY(-4px); opacity: 0.95; }
+    }
+
+    a.back{
+      color: rgba(255,255,255,0.88);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(255,255,255,0.22);
+    }
+    a.back:hover{ border-bottom-color: rgba(255,255,255,0.5); }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"></div>
+        <div>
+          <h1>{{ app_name }}</h1>
+          <div class="sub">
+            Estimate for {{ dep_icao }} → {{ dest_icao }} ({{ depart_date }}{% if trip_type == "roundtrip" and return_date %} returning {{ return_date }}{% endif %})
+            · <a class="back" href="/">Back</a>
+          </div>
+        </div>
       </div>
 
-      <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-5">
-        <div class="text-sm text-slate-400">Conservative (total)</div>
-        <div class="mt-1 text-3xl font-semibold">{{ total_con_cost }}</div>
-        <div class="mt-2 text-sm text-slate-400">Estimated time: <span class="text-slate-200 font-medium">{{ total_con_time }}</span></div>
+      <div class="badge" title="Estimate view">
+        <span class="dot" aria-hidden="true"></span>
+        Estimate
       </div>
     </div>
-    <div class="mt-4 text-xs text-slate-500">
-      Total cost includes Mgmt + Maint + Engine reserve + Fuel.
-    </div>
-  </div>
 
-  <!-- Map -->
-  <div class="rounded-2xl overflow-hidden border border-slate-800">
-    <div id="map" class="h-[420px]"></div>
-  </div>
-
-  <!-- Per-leg breakdown -->
-  <div class="space-y-6">
-    {% for leg in legs %}
-      <div class="rounded-2xl bg-slate-900 border border-slate-800 p-6">
-        <div class="flex items-start justify-between gap-4">
+    <div class="grid">
+      <!-- LEFT: Summary + Map + Charts -->
+      <div class="card">
+        <div class="cardHeader">
           <div>
-            <div class="text-xs uppercase tracking-wide text-slate-500">Leg {{ loop.index }}</div>
-            <div class="text-lg font-medium mt-1">{{ leg.from_pretty }}</div>
-            <div class="text-lg font-medium">{{ leg.to_pretty }}</div>
-            <div class="text-sm text-slate-400 mt-2">Distance: {{ leg.dist_nm }} NM</div>
+            <h2>Big picture</h2>
+            <p>Switch between Typical and Conservative and everything updates.</p>
           </div>
 
-          <!-- De-emphasized winds -->
-          <div class="text-right max-w-sm">
-            <div class="text-xs uppercase tracking-wide text-slate-600">Conditions</div>
-            <div class="text-sm text-slate-500 mt-1">
-              Winds aloft: <span class="text-slate-400">{{ leg.wind_sign }}{{ leg.wind_abs }} kt</span>
-            </div>
-            <div class="text-xs text-slate-600 mt-1">{{ leg.wind_details }}</div>
+          <div class="toggle" role="tablist" aria-label="Assumptions toggle">
+            <button id="btnTypical" class="active" type="button">Typical</button>
+            <button id="btnConservative" type="button">Conservative</button>
           </div>
         </div>
 
-        <div class="mt-6 grid md:grid-cols-2 gap-6">
-          <!-- Typical -->
-          <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-5">
-            <div class="text-sm font-semibold">Typical</div>
-            <div class="mt-3 space-y-2 text-sm">
-              <div class="flex justify-between">
-                <span class="text-slate-400">Cruise ground speed</span>
-                <span class="font-medium">{{ leg.typ.gs }} kt</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-slate-400">Block time</span>
-                <span class="font-medium">{{ leg.typ.time }}</span>
-              </div>
+        <div class="cardBody">
+          <div id="summary" class="bigSummary">
+            {{ summary_seed }}
+            <div class="muted">
+              Tip: Conservative mostly means a bit slower (routing + overhead), so it burns more fuel and time.
+            </div>
+          </div>
+
+          <div class="kpis" aria-label="Key metrics">
+            <div class="kpi">
+              <div class="label">Total block time</div>
+              <div class="value" id="kpiTime">{{ total_time_typ }}</div>
+              <div class="sub" id="kpiTimeSub">Includes taxi/climb/approach overhead</div>
             </div>
 
-            <div class="mt-5 border-t border-slate-800 pt-4">
-              <div class="flex justify-between text-lg font-semibold">
-                <span>Cost</span>
-                <span>{{ leg.typ.cost }}</span>
+            <div class="kpi">
+              <div class="label">Total cost</div>
+              <div class="value" id="kpiCost">{{ total_cost_typ }}</div>
+              <div class="sub" id="kpiCostSub">Mgmt + maint + engine + fuel</div>
+            </div>
+
+            <div class="kpi">
+              <div class="label">Fuel estimate</div>
+              <div class="value" id="kpiFuel">—</div>
+              <div class="sub" id="kpiFuelSub">{{ fuel_burn_gph }} gph · ${{ fuel_price }}/gal</div>
+            </div>
+          </div>
+
+          <div style="margin-top: 14px;">
+            <div class="pillRow">
+              <div class="pill"><strong>Routing</strong> Typical +{{ routing_typ_pct }}% · Conservative +{{ routing_con_pct }}%</div>
+              <div class="pill"><strong>Overhead</strong> Typical {{ overhead_typ_min }} min · Conservative {{ overhead_con_min }} min</div>
+            </div>
+          </div>
+
+          <div style="margin-top: 14px;">
+            <div id="map" aria-label="Route map"></div>
+            <div class="micro" style="margin-top: 8px;">
+              Animated line is for visual intuition only — your real route may vary.
+            </div>
+          </div>
+
+          <div style="margin-top: 14px;" class="row2">
+            <div class="windBox">
+              <div class="windTop">
+                <div>
+                  <div class="micro">Outbound winds (FL270 head/tail component)</div>
+                  <div class="windVal" id="windValue">— <small>kt</small></div>
+                </div>
+                <div class="pill" id="windLabel">—</div>
               </div>
-              <div class="mt-2 text-xs text-slate-500">
-                Mgmt {{ leg.typ.mgmt }} · Maint {{ leg.typ.maint }} · Engine {{ leg.typ.eng }} · Fuel {{ leg.typ.fuel }}
+              <div class="windBar" aria-label="Wind component bar">
+                <div class="windCenter"></div>
+                <div id="windFill" class="windFill"></div>
+              </div>
+              <div class="windMeta" id="windDetails">—</div>
+            </div>
+
+            <div>
+              <div class="micro" style="margin-bottom: 8px;">Cost breakdown (interactive)</div>
+              <div class="costGrid">
+                <div class="donutWrap">
+                  <svg id="donut" width="190" height="190" viewBox="0 0 190 190" aria-label="Donut chart"></svg>
+                </div>
+                <div class="legend" aria-label="Cost legend">
+                  <div class="legendRow">
+                    <div class="legendLeft"><span class="swatch" id="swMgmt"></span> Management</div>
+                    <div class="legendVal" id="valMgmt">—</div>
+                  </div>
+                  <div class="legendRow">
+                    <div class="legendLeft"><span class="swatch" id="swMaint"></span> Maintenance reserve</div>
+                    <div class="legendVal" id="valMaint">—</div>
+                  </div>
+                  <div class="legendRow">
+                    <div class="legendLeft"><span class="swatch" id="swEngine"></span> Engine reserve</div>
+                    <div class="legendVal" id="valEngine">—</div>
+                  </div>
+                  <div class="legendRow">
+                    <div class="legendLeft"><span class="swatch" id="swFuel"></span> Fuel</div>
+                    <div class="legendVal" id="valFuel">—</div>
+                  </div>
+                  <div class="micro" style="margin-top: 8px;">
+                    Click a slice to “spotlight” it.
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          <!-- Conservative -->
-          <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-5">
-            <div class="text-sm font-semibold">Conservative</div>
-            <div class="mt-3 space-y-2 text-sm">
-              <div class="flex justify-between">
-                <span class="text-slate-400">Cruise ground speed</span>
-                <span class="font-medium">{{ leg.con.gs }} kt</span>
+          <div class="legs" aria-label="Leg details">
+            {% for leg in legs %}
+              <div class="legRow">
+                <div class="legTop">
+                  <div class="legTitle">{{ leg.from }} → {{ leg.to }}</div>
+                  <div class="legNums">
+                    <div class="tag">Distance <strong>{{ leg.distance_nm }}</strong> nm</div>
+                    <div class="tag">Course <strong>{{ leg.course_deg }}</strong>°</div>
+                  </div>
+                </div>
+                <div class="legMeta" id="legMeta{{ loop.index0 }}">
+                  <!-- JS fills this based on toggle -->
+                </div>
               </div>
-              <div class="flex justify-between">
-                <span class="text-slate-400">Block time</span>
-                <span class="font-medium">{{ leg.con.time }}</span>
-              </div>
-            </div>
-
-            <div class="mt-5 border-t border-slate-800 pt-4">
-              <div class="flex justify-between text-lg font-semibold">
-                <span>Cost</span>
-                <span>{{ leg.con.cost }}</span>
-              </div>
-              <div class="mt-2 text-xs text-slate-500">
-                Mgmt {{ leg.con.mgmt }} · Maint {{ leg.con.maint }} · Engine {{ leg.con.eng }} · Fuel {{ leg.con.fuel }}
-              </div>
-            </div>
+            {% endfor %}
           </div>
         </div>
       </div>
-    {% endfor %}
+
+      <!-- RIGHT: Natural follow-ups -->
+      <div class="card">
+        <div class="cardHeader">
+          <div>
+            <h2>Ask a follow-up</h2>
+            <p>Ask normal questions about this estimate. It’ll answer in plain English.</p>
+          </div>
+        </div>
+
+        <div class="cardBody">
+          <div id="chatThread" class="chatThread" aria-live="polite">
+            <div class="typing" style="opacity:.9;">
+              Try: “If I leave at noon, what changes?” or “What’s driving the cost the most?”
+            </div>
+          </div>
+
+          <div class="chips" aria-label="Example follow-ups">
+            <div class="chip" data-msg="What’s driving the cost the most on this estimate?">What’s driving the cost?</div>
+            <div class="chip" data-msg="How much of the total is fuel, roughly?">How much is fuel?</div>
+            <div class="chip" data-msg="What changes between typical and conservative, in plain terms?">Typical vs conservative?</div>
+            <div class="chip" data-msg="If I add a quick stop for fuel, how should I think about the cost impact?">Add a stop?</div>
+          </div>
+
+          <form id="chatForm" class="chatForm">
+            <textarea id="chatInput" placeholder="Ask about this estimate…" spellcheck="false"></textarea>
+            <button id="chatSend" class="btn btnPrimary" type="submit">Send</button>
+          </form>
+
+          <div id="chatStatus" class="status"></div>
+          <div class="micro">
+            Enter to send · Shift+Enter for a new line
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <!-- Back -->
-  <div class="text-center pt-4">
-    <a href="/" class="text-sky-400 hover:text-sky-300 text-sm">
-      ← New estimate
-    </a>
-  </div>
+  <script>
+    // Estimate payload from server (full JSON)
+    const EST = {{ estimation_json|safe }};
 
-</div>
+    // Toggle state
+    let MODE = "typical"; // "typical" | "conservative"
 
-<!-- Leaflet -->
-<link
-  rel="stylesheet"
-  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    const btnTypical = document.getElementById("btnTypical");
+    const btnConservative = document.getElementById("btnConservative");
 
-<script>
-  const map = L.map("map", { zoomControl: false });
+    function setMode(mode){
+      MODE = mode;
+      btnTypical.classList.toggle("active", MODE === "typical");
+      btnConservative.classList.toggle("active", MODE === "conservative");
+      renderAll();
+    }
 
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 10,
-  }).addTo(map);
+    btnTypical.addEventListener("click", () => setMode("typical"));
+    btnConservative.addEventListener("click", () => setMode("conservative"));
 
-  const dep = [{{ dep_lat|tojson }}, {{ dep_lon|tojson }}];
-  const dest = [{{ dest_lat|tojson }}, {{ dest_lon|tojson }}];
+    function fmtMoney(n){
+      try { return new Intl.NumberFormat(undefined, { style:"currency", currency:"USD", maximumFractionDigits:0 }).format(n); }
+      catch { return "$" + Math.round(n).toLocaleString(); }
+    }
+    function fmtHours(h){
+      const totalMin = Math.round(h * 60);
+      const hh = Math.floor(totalMin / 60);
+      const mm = totalMin % 60;
+      return `${hh}:${String(mm).padStart(2,"0")}`;
+    }
 
-  const route = L.polyline([dep, dest], { color: "#38bdf8", weight: 4 }).addTo(map);
-  L.marker(dep).addTo(map);
-  L.marker(dest).addTo(map);
+    // ---------------- Map (Leaflet) ----------------
+    const map = L.map("map", { zoomControl: false, attributionControl: true });
+    L.control.zoom({ position: "bottomright" }).addTo(map);
 
-  map.fitBounds(route.getBounds(), { padding: [40, 40] });
-</script>
-{% endblock %}
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 11,
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    // Great-circle-ish interpolation (simple)
+    function lerp(a,b,t){ return a + (b-a)*t; }
+    function interpolatePoints(lat1, lon1, lat2, lon2, steps){
+      const pts = [];
+      for (let i=0;i<=steps;i++){
+        const t = i/steps;
+        pts.push([lerp(lat1,lat2,t), lerp(lon1,lon2,t)]);
+      }
+      return pts;
+    }
+
+    // Route layers
+    let routeLine = null;
+    let planeMarker = null;
+    let depMarker = null;
+    let destMarker = null;
+    let animTimer = null;
+
+    function buildRouteFromLegs(){
+      // If roundtrip: animate only outbound by default, but show both legs in line.
+      const segments = [];
+      for (const leg of EST.legs){
+        segments.push({
+          from: [leg.from_lat, leg.from_lon],
+          to: [leg.to_lat, leg.to_lon]
+        });
+      }
+      return segments;
+    }
+
+    function renderMap(){
+      // clear old
+      if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+      if (planeMarker) { map.removeLayer(planeMarker); planeMarker = null; }
+      if (depMarker) { map.removeLayer(depMarker); depMarker = null; }
+      if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+      if (animTimer) { clearInterval(animTimer); animTimer = null; }
+
+      const segments = buildRouteFromLegs();
+      const allPoints = [];
+
+      // Build polyline points for all legs
+      segments.forEach(seg => {
+        const pts = interpolatePoints(seg.from[0], seg.from[1], seg.to[0], seg.to[1], 70);
+        pts.forEach(p => allPoints.push(p));
+      });
+
+      routeLine = L.polyline(allPoints, {
+        weight: 3,
+        opacity: 0.9
+      }).addTo(map);
+
+      // Start/End markers (overall trip endpoints)
+      const first = segments[0].from;
+      const last = segments[segments.length-1].to;
+
+      depMarker = L.circleMarker(first, { radius: 7, weight: 2, opacity: 0.9, fillOpacity: 0.25 }).addTo(map);
+      destMarker = L.circleMarker(last, { radius: 7, weight: 2, opacity: 0.9, fillOpacity: 0.25 }).addTo(map);
+
+      depMarker.bindTooltip(EST.legs[0].from + " (depart)", { direction:"top", offset:[0,-6] });
+      destMarker.bindTooltip(EST.legs[segments.length-1].to + " (arrive)", { direction:"top", offset:[0,-6] });
+
+      map.fitBounds(routeLine.getBounds().pad(0.25));
+
+      // Animated “plane” marker along the polyline
+      const planeIcon = L.divIcon({
+        className: "",
+        html: `<div style="
+          width:28px;height:28px;border-radius:999px;
+          display:flex;align-items:center;justify-content:center;
+          border:1px solid rgba(255,255,255,0.20);
+          background: rgba(110,168,254,0.18);
+          box-shadow: 0 10px 22px rgba(0,0,0,0.35);
+          backdrop-filter: blur(6px);
+        ">
+          <div style="
+            width:0;height:0;
+            border-left:8px solid rgba(255,255,255,0.92);
+            border-top:6px solid transparent;
+            border-bottom:6px solid transparent;
+            transform: translateX(1px);
+          "></div>
+        </div>`,
+        iconSize: [28,28],
+        iconAnchor: [14,14]
+      });
+
+      planeMarker = L.marker(allPoints[0], { icon: planeIcon }).addTo(map);
+
+      let idx = 0;
+      const speed = MODE === "typical" ? 1 : 1; // keep same, just for fun
+      animTimer = setInterval(() => {
+        idx += speed;
+        if (idx >= allPoints.length) idx = 0;
+        planeMarker.setLatLng(allPoints[idx]);
+      }, 45);
+    }
+
+    // ---------------- Winds viz ----------------
+    function renderWinds(){
+      const w = EST.winds_outbound;
+      const comp = Number(w.component_kt || 0);
+      const abs = Math.abs(Math.round(comp));
+      const label = comp > 5 ? "Tailwind" : (comp < -5 ? "Headwind" : "Light winds");
+
+      document.getElementById("windValue").innerHTML = `${Math.round(comp)} <small>kt</small>`;
+      document.getElementById("windLabel").textContent = label;
+
+      const fill = document.getElementById("windFill");
+      // Map +/-60 kt to bar width
+      const max = 60;
+      const pct = Math.min(100, Math.round((Math.min(max, Math.abs(comp)) / max) * 50)); // up to 50% on either side
+      fill.classList.remove("head","tail");
+      if (comp >= 0) {
+        fill.classList.add("tail");
+        fill.style.left = "50%";
+        fill.style.right = "auto";
+        fill.style.width = pct + "%";
+      } else {
+        fill.classList.add("head");
+        fill.style.left = (50 - pct) + "%";
+        fill.style.right = "auto";
+        fill.style.width = pct + "%";
+      }
+
+      document.getElementById("windDetails").textContent = w.details || "";
+    }
+
+    // ---------------- Donut chart ----------------
+    const donut = document.getElementById("donut");
+
+    function polarToCartesian(cx, cy, r, angleDeg){
+      const a = (angleDeg - 90) * Math.PI / 180.0;
+      return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+    }
+    function arcPath(cx, cy, r, startAngle, endAngle){
+      const start = polarToCartesian(cx, cy, r, endAngle);
+      const end = polarToCartesian(cx, cy, r, startAngle);
+      const large = endAngle - startAngle <= 180 ? "0" : "1";
+      return `M ${start.x} ${start.y} A ${r} ${r} 0 ${large} 0 ${end.x} ${end.y}`;
+    }
+
+    // fixed “swatches” so legend is consistent (don’t rely on theme colors)
+    const COLORS = {
+      mgmt: "rgba(110,168,254,0.85)",
+      maint: "rgba(124,242,194,0.80)",
+      engine: "rgba(255,209,102,0.78)",
+      fuel: "rgba(255,92,112,0.72)",
+    };
+
+    function renderCostBreakdown(){
+      const totals = EST.totals[MODE].costs;
+
+      const parts = [
+        { key:"mgmt", label:"Management", value:Number(totals.mgmt||0), color: COLORS.mgmt },
+        { key:"maint", label:"Maintenance reserve", value:Number(totals.maint||0), color: COLORS.maint },
+        { key:"engine", label:"Engine reserve", value:Number(totals.engine||0), color: COLORS.engine },
+        { key:"fuel", label:"Fuel", value:Number(totals.fuel||0), color: COLORS.fuel },
+      ];
+
+      document.getElementById("valMgmt").textContent = fmtMoney(parts[0].value);
+      document.getElementById("valMaint").textContent = fmtMoney(parts[1].value);
+      document.getElementById("valEngine").textContent = fmtMoney(parts[2].value);
+      document.getElementById("valFuel").textContent = fmtMoney(parts[3].value);
+
+      document.getElementById("swMgmt").style.background = parts[0].color;
+      document.getElementById("swMaint").style.background = parts[1].color;
+      document.getElementById("swEngine").style.background = parts[2].color;
+      document.getElementById("swFuel").style.background = parts[3].color;
+
+      // Donut SVG
+      donut.innerHTML = "";
+
+      const total = parts.reduce((s,p)=>s+p.value,0) || 1;
+      let angle = 0;
+
+      // background ring
+      const bg = document.createElementNS("http://www.w3.org/2000/svg","circle");
+      bg.setAttribute("cx","95"); bg.setAttribute("cy","95");
+      bg.setAttribute("r","70");
+      bg.setAttribute("fill","none");
+      bg.setAttribute("stroke","rgba(255,255,255,0.10)");
+      bg.setAttribute("stroke-width","18");
+      donut.appendChild(bg);
+
+      const g = document.createElementNS("http://www.w3.org/2000/svg","g");
+      donut.appendChild(g);
+
+      // center text
+      const center = document.createElementNS("http://www.w3.org/2000/svg","text");
+      center.setAttribute("x","95");
+      center.setAttribute("y","92");
+      center.setAttribute("text-anchor","middle");
+      center.setAttribute("fill","rgba(255,255,255,0.92)");
+      center.setAttribute("font-size","14");
+      center.setAttribute("font-weight","750");
+      center.textContent = "Total";
+      donut.appendChild(center);
+
+      const center2 = document.createElementNS("http://www.w3.org/2000/svg","text");
+      center2.setAttribute("x","95");
+      center2.setAttribute("y","114");
+      center2.setAttribute("text-anchor","middle");
+      center2.setAttribute("fill","rgba(255,255,255,0.75)");
+      center2.setAttribute("font-size","12");
+      center2.setAttribute("font-weight","650");
+      center2.textContent = fmtMoney(Number(EST.totals[MODE].costs.total||0));
+      donut.appendChild(center2);
+
+      let spotlight = null;
+
+      function setSpotlight(key){
+        spotlight = (spotlight === key) ? null : key;
+        // rerender arcs with updated opacity
+        renderCostBreakdown();
+      }
+
+      parts.forEach(p => {
+        const share = p.value / total;
+        const sweep = share * 360;
+        const start = angle;
+        const end = angle + sweep;
+        angle = end;
+
+        const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+        path.setAttribute("d", arcPath(95,95,70,start,end));
+        path.setAttribute("fill","none");
+        path.setAttribute("stroke", p.color);
+        path.setAttribute("stroke-width","18");
+        path.setAttribute("stroke-linecap","round");
+        path.style.cursor = "pointer";
+        path.style.opacity = (!spotlight || spotlight === p.key) ? "1" : "0.25";
+
+        // click to spotlight
+        path.addEventListener("click", () => {
+          spotlight = (spotlight === p.key) ? null : p.key;
+          // simple rerender by calling again
+          renderAll();
+        });
+
+        g.appendChild(path);
+      });
+    }
+
+    // ---------------- KPI + Legs + Summary ----------------
+    function renderKPIs(){
+      const t = EST.totals[MODE];
+      const totalCost = Number(t.costs.total||0);
+      const fuelGal = Number(t.costs.fuel_gal||0);
+
+      document.getElementById("kpiTime").textContent = t.block_time;
+      document.getElementById("kpiCost").textContent = fmtMoney(totalCost);
+      document.getElementById("kpiFuel").textContent = `${Math.round(fuelGal)} gal`;
+
+      // Legs text
+      EST.legs.forEach((leg, idx) => {
+        const which = leg[MODE];
+        const c = which.costs;
+        const fuel = Math.round(Number(c.fuel_gal||0));
+        const wind = Math.round(Number(leg.winds.component_kt||0));
+        const windTxt = wind > 5 ? `${wind} kt tailwind` : (wind < -5 ? `${Math.abs(wind)} kt headwind` : `light winds`);
+
+        const line = `${which.block_time} block, about ${fmtMoney(Number(c.total||0))}. Groundspeed around ${which.gs_kt} kt with ${windTxt}. Fuel about ${fuel} gal.`;
+        const el = document.getElementById(`legMeta${idx}`);
+        if (el) el.textContent = line;
+      });
+
+      // Summary paragraph (less report-y)
+      const dep = EST.inputs.dep;
+      const dest = EST.inputs.dest;
+      const tripType = EST.inputs.trip_type === "roundtrip" ? "round trip" : "one-way";
+      const departDate = EST.inputs.depart_date;
+      const returnDate = EST.inputs.return_date;
+
+      const w = Number(EST.winds_outbound.component_kt||0);
+      const wAbs = Math.abs(Math.round(w));
+      const wPhrase = w > 5 ? "a tailwind" : (w < -5 ? "a headwind" : "light winds");
+
+      let windLine = "Winds look light on the outbound leg.";
+      if (wAbs > 5) windLine = `Outbound winds look like about ${wAbs} kt of ${wPhrase}.`;
+
+      let dateLine = `Leaving ${departDate}`;
+      if (returnDate && EST.inputs.trip_type === "roundtrip") dateLine += ` and returning ${returnDate}`;
+
+      const time = EST.totals[MODE].block_time;
+      const cost = fmtMoney(Number(EST.totals[MODE].costs.total||0));
+
+      const compareMode = MODE === "typical" ? "Conservative" : "Typical";
+      const other = EST.totals[MODE === "typical" ? "conservative" : "typical"];
+      const otherCost = fmtMoney(Number(other.costs.total||0));
+      const otherTime = other.block_time;
+
+      const summary =
+        `For a ${tripType} from ${dep} to ${dest} (${dateLine}), ` +
+        `${MODE} assumptions put you at about ${time} and ${cost}. ` +
+        `${windLine} ` +
+        `${compareMode} would be closer to ${otherTime} and ${otherCost}.`;
+
+      document.getElementById("summary").firstChild.textContent = summary;
+    }
+
+    // ---------------- Follow-up chat (context-aware) ----------------
+    const thread = document.getElementById("chatThread");
+    const form = document.getElementById("chatForm");
+    const input = document.getElementById("chatInput");
+    const sendBtn = document.getElementById("chatSend");
+    const status = document.getElementById("chatStatus");
+
+    function scrollToBottom(){ thread.scrollTop = thread.scrollHeight; }
+    function clearPlaceholderIfNeeded(){
+      if (thread.children.length === 1 && thread.textContent.includes("Try:")) thread.innerHTML = "";
+    }
+    function addBubble(text, who){
+      const row = document.createElement("div");
+      row.className = "bubbleRow " + (who === "me" ? "me" : "ai");
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble " + (who === "me" ? "me" : "ai");
+      bubble.textContent = text;
+
+      row.appendChild(bubble);
+      thread.appendChild(row);
+      scrollToBottom();
+    }
+
+    function showTyping(){
+      const row = document.createElement("div");
+      row.className = "bubbleRow ai";
+      row.id = "typingRow";
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble ai";
+      bubble.style.display = "inline-flex";
+      bubble.style.alignItems = "center";
+      bubble.style.gap = "8px";
+
+      const label = document.createElement("span");
+      label.className = "typing";
+      label.textContent = "Thinking";
+
+      const dots = document.createElement("span");
+      dots.className = "dots";
+      dots.innerHTML = '<span class="dotB"></span><span class="dotB"></span><span class="dotB"></span>';
+
+      bubble.appendChild(label);
+      bubble.appendChild(dots);
+      row.appendChild(bubble);
+      thread.appendChild(row);
+      scrollToBottom();
+    }
+    function hideTyping(){
+      const el = document.getElementById("typingRow");
+      if (el) el.remove();
+    }
+    function setBusy(b){
+      sendBtn.disabled = b;
+      input.disabled = b;
+      if (b) status.textContent = "";
+    }
+
+    function buildContextPrefix(){
+      const dep = EST.inputs.dep;
+      const dest = EST.inputs.dest;
+      const depart = EST.inputs.depart_date;
+      const ret = EST.inputs.return_date;
+      const tripType = EST.inputs.trip_type === "roundtrip" ? "round trip" : "one-way";
+
+      const time = EST.totals[MODE].block_time;
+      const cost = fmtMoney(Number(EST.totals[MODE].costs.total||0));
+      const wind = Math.round(Number(EST.winds_outbound.component_kt||0));
+      const windTxt = wind > 5 ? `${wind} kt tailwind` : (wind < -5 ? `${Math.abs(wind)} kt headwind` : "light winds");
+
+      let dateLine = depart;
+      if (ret && EST.inputs.trip_type === "roundtrip") dateLine = `${depart} returning ${ret}`;
+
+      return `Context: I’m looking at an estimate for a ${tripType} from ${dep} to ${dest} (${dateLine}). Using ${MODE} assumptions it’s about ${time} and ${cost}, with ${windTxt} on the outbound leg. Now my question: `;
+    }
+
+    async function sendFollowup(message){
+      setBusy(true);
+      showTyping();
+
+      try{
+        const full = buildContextPrefix() + message;
+
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: full })
+        });
+
+        const data = await res.json().catch(() => null);
+        hideTyping();
+
+        if (!res.ok){
+          const errText = data?.error || `Request failed (${res.status})`;
+          status.textContent = errText;
+          addBubble("Something went wrong. " + errText, "ai");
+          return;
+        }
+
+        if (data?.reply){
+          addBubble(data.reply, "ai");
+        } else if (data?.error){
+          status.textContent = data.error;
+          addBubble("Something went wrong. " + data.error, "ai");
+        } else {
+          addBubble("Hmm — I got an unexpected response from the server.", "ai");
+        }
+      } catch(e){
+        hideTyping();
+        status.textContent = String(e);
+        addBubble("Couldn’t reach the server. " + String(e), "ai");
+      } finally {
+        setBusy(false);
+        input.focus();
+      }
+    }
+
+    // Enter to send, Shift+Enter newline
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey){
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = (input.value || "").trim();
+      if (!msg) return;
+
+      clearPlaceholderIfNeeded();
+      addBubble(msg, "me");
+      input.value = "";
+      await sendFollowup(msg);
+    });
+
+    document.querySelectorAll(".chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        input.value = chip.getAttribute("data-msg") || "";
+        input.focus();
+      });
+    });
+
+    // ---------------- Render pipeline ----------------
+    function renderAll(){
+      renderKPIs();
+      renderWinds();
+      renderCostBreakdown();
+      renderMap();
+    }
+
+    // Initialize
+    renderAll();
+  </script>
+</body>
+</html>

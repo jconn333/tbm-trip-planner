@@ -16,17 +16,18 @@ import airportsdata
 
 from dotenv import load_dotenv
 
-# ------------------ Env (.env) ------------------
+# Load .env from the same directory as this file (works no matter where you run from)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-# ------------------ OpenAI ------------------
+# OpenAI SDK (reads OPENAI_API_KEY from environment)
 try:
     from openai import OpenAI
 except Exception:
     OpenAI = None
 
-# IMPORTANT: your repo uses "Templates" (capital T)
+
+# IMPORTANT: templates folder is lowercase now
 app = Flask(__name__, template_folder="templates")
 
 APP_NAME = "TBM Trip Planner"
@@ -377,8 +378,11 @@ def estimate_leg(dep_icao: str, dest_icao: str, depart_dt_local: str | None):
     dep = get_airport_by_icao(dep_icao)
     dest = get_airport_by_icao(dest_icao)
 
-    dist_nm = haversine_nm(float(dep["lat"]), float(dep["lon"]), float(dest["lat"]), float(dest["lon"]))
-    course = initial_bearing_deg(float(dep["lat"]), float(dep["lon"]), float(dest["lat"]), float(dest["lon"]))
+    dep_lat, dep_lon = float(dep["lat"]), float(dep["lon"])
+    dest_lat, dest_lon = float(dest["lat"]), float(dest["lon"])
+
+    dist_nm = haversine_nm(dep_lat, dep_lon, dest_lat, dest_lon)
+    course = initial_bearing_deg(dep_lat, dep_lon, dest_lat, dest_lon)
 
     wind_component, wind_details = wind_component_fl270_kts(dep, dest, depart_dt_local)
 
@@ -399,6 +403,10 @@ def estimate_leg(dep_icao: str, dest_icao: str, depart_dt_local: str | None):
         "to": dest_icao,
         "from_pretty": pretty_airport(dep),
         "to_pretty": pretty_airport(dest),
+        "from_lat": dep_lat,
+        "from_lon": dep_lon,
+        "to_lat": dest_lat,
+        "to_lon": dest_lon,
         "distance_nm": int(round(dist_nm)),
         "course_deg": int(round(course)),
         "winds": {
@@ -541,8 +549,8 @@ def chat_page():
 def estimate_page():
     dep_icao = (request.form.get("dep_icao") or "").strip().upper()
     dest_icao = (request.form.get("dest_icao") or "").strip().upper()
-    trip_type_raw = (request.form.get("trip_type") or "oneway").strip().lower()
-    trip_type = "roundtrip" if trip_type_raw == "roundtrip" else "oneway"
+    trip_type = (request.form.get("trip_type") or "oneway").strip().lower()
+    trip_type = "roundtrip" if trip_type == "roundtrip" else "oneway"
 
     depart_date = parse_date_only(request.form.get("depart_date"))
     return_date = parse_date_only(request.form.get("return_date"))
@@ -553,10 +561,27 @@ def estimate_page():
     est = estimate_trip(dep_icao, dest_icao, trip_type, depart_date, return_date)
     legs = est["legs"]
 
+    # Totals for the UI (nice formatted)
     total_time_typ = est["totals"]["typical"]["block_time"]
     total_cost_typ = money(float(est["totals"]["typical"]["costs"]["total"]))
     total_time_con = est["totals"]["conservative"]["block_time"]
     total_cost_con = money(float(est["totals"]["conservative"]["costs"]["total"]))
+
+    # Plain-English “top summary” seed text for estimate.html
+    wind = legs[0]["winds"]["component_kt"]
+    wind_phrase = "a tailwind" if wind > 5 else ("a headwind" if wind < -5 else "light winds")
+    wind_abs = abs(int(round(wind)))
+    if wind_abs <= 5:
+        wind_line = f"Winds look light for the outbound leg."
+    else:
+        wind_line = f"Winds look like {wind_abs} kt of {wind_phrase} on the outbound leg."
+
+    if trip_type == "roundtrip":
+        trip_line = f"Round trip from {dep_icao} to {dest_icao}."
+    else:
+        trip_line = f"One-way from {dep_icao} to {dest_icao}."
+
+    summary_seed = f"{trip_line} Typical comes out around {total_time_typ} and {total_cost_typ}. Conservative is closer to {total_time_con} and {total_cost_con}. {wind_line}"
 
     return render_template(
         "estimate.html",
@@ -564,23 +589,33 @@ def estimate_page():
         trip_type=trip_type,
         depart_date=depart_date.isoformat(),
         return_date=(return_date.isoformat() if return_date else None),
+
+        dep_icao=dep_icao,
+        dest_icao=dest_icao,
+
         dep_pretty=legs[0]["from_pretty"],
         dest_pretty=legs[0]["to_pretty"],
+
         legs=legs,
+        estimation_json=json.dumps(est),
+
         total_time_typ=total_time_typ,
         total_cost_typ=total_cost_typ,
         total_time_con=total_time_con,
         total_cost_con=total_cost_con,
+
         fuel_burn_gph=FUEL_BURN_GPH,
         fuel_price=f"{FUEL_PRICE_PER_GAL:.2f}",
         routing_typ_pct=int(round((ROUTING_TYPICAL - 1) * 100)),
         routing_con_pct=int(round((ROUTING_CONSERVATIVE - 1) * 100)),
         overhead_typ_min=OVERHEAD_TYPICAL_MIN,
         overhead_con_min=OVERHEAD_CONSERVATIVE_MIN,
+
+        summary_seed=summary_seed,
     )
 
 
-# ------------------ Chatbot (Option B: tool-calling, but conversational tone) ------------------
+# ------------------ Chatbot (Tool-calling via Chat Completions) ------------------
 def _has_openai() -> bool:
     return OpenAI is not None and bool(os.getenv("OPENAI_API_KEY"))
 
@@ -609,46 +644,29 @@ def _tool_search_airports(query: str):
     return [{"icao": c["icao"], "label": pretty_airport(c)} for c in choices]
 
 
-def _clean_text(s: str) -> str:
-    """Strip common markdown-ish formatting so it reads more like normal chat."""
-    if not s:
-        return ""
-    s = s.replace("**", "").replace("__", "")
-    # Remove leading bullet markers
-    s = re.sub(r"(?m)^\s*[-*]\s+", "", s)
-    # Collapse extra blank lines
-    s = re.sub(r"\n{3,}", "\n\n", s).strip()
-    return s
-
-
 @app.post("/api/chat")
 def api_chat():
     data = request.get_json(silent=True) or {}
     msg = (data.get("message") or "").strip()
 
     if not msg:
-        return jsonify({"reply": "Tell me something like: how much to fly from KCAK to KSRQ tomorrow?"}), 200
+        return jsonify({"reply": "Try: How much would it cost to fly from KCAK to KSRQ tomorrow?"}), 200
 
-    # If key/library missing, still return something useful (and conversational)
+    # Fallback if key/library missing
     if not _has_openai():
         codes = re.findall(r"\bK[A-Z0-9]{3}\b", msg.upper())
         if len(codes) < 2:
-            return jsonify({"reply": "Give me two airport codes like KCAK and KSRQ, plus a date (today/tomorrow works)."}), 200
-
+            return jsonify({"reply": "I can do that — just give me two airport ICAO codes (like KCAK and KSRQ) and a date."}), 200
         dep, dest = codes[0], codes[1]
         trip_type = "roundtrip" if "round" in msg.lower() else "oneway"
         d = parse_date_only(msg) or (date.today() + timedelta(days=1))
-
         est = estimate_trip(dep, dest, trip_type, d, None)
         typical_total = float(est["totals"]["typical"]["costs"]["total"])
         typical_time = est["totals"]["typical"]["block_time"]
+        return jsonify({"reply": f"For {dep} to {dest} on {d.isoformat()}, I get about {money(typical_total)} and {typical_time} (typical assumptions)."}), 200
 
-        reply = f"For {dep} to {dest} on {d.isoformat()}, you’re roughly looking at {money(typical_total)} and about {typical_time} block time (typical case)."
-        return jsonify({"reply": reply, "estimation": est}), 200
-
-    # OpenAI tool-calling
     client = OpenAI()
-    model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+    model = os.getenv("OPENAI_CHAT_MODEL", "gpt-5.2-mini")
 
     tools = [
         {
@@ -662,8 +680,8 @@ def api_chat():
                         "dep": {"type": "string", "description": "Departure ICAO like KCAK"},
                         "dest": {"type": "string", "description": "Destination ICAO like KSRQ"},
                         "trip_type": {"type": "string", "enum": ["oneway", "roundtrip"]},
-                        "depart_date": {"type": "string", "description": "YYYY-MM-DD or today/tomorrow"},
-                        "return_date": {"type": ["string", "null"], "description": "YYYY-MM-DD or today/tomorrow or null"},
+                        "depart_date": {"type": "string", "description": "YYYY-MM-DD (or 'today'/'tomorrow')"},
+                        "return_date": {"type": ["string", "null"], "description": "YYYY-MM-DD (or 'today'/'tomorrow') or null"},
                     },
                     "required": ["dep", "dest", "trip_type", "depart_date"],
                     "additionalProperties": False,
@@ -686,12 +704,12 @@ def api_chat():
     ]
 
     system = (
-        f"You are the chat assistant inside {APP_NAME}.\n"
-        "Talk like ChatGPT: natural, friendly, plain text.\n"
-        "Avoid markdown, bullet lists, and heavy formatting.\n"
-        "When the user asks about cost/time for a trip, call estimate_trip.\n"
-        "If the user gives a city/name instead of ICAO codes, call search_airports and then ask which ICAO they mean.\n"
-        "Keep answers short unless the user asks for details.\n"
+        f"You are {APP_NAME}'s assistant.\n"
+        "Write like ChatGPT: friendly, natural, plain text.\n"
+        "No markdown formatting. No bullet spam. Keep it conversational.\n"
+        "When the user asks for cost/time, call estimate_trip.\n"
+        "If the user gives a city/name instead of ICAO, call search_airports and ask which one they mean.\n"
+        "You may pass 'today'/'tomorrow' as dates (the server can parse them).\n"
     )
 
     messages = [
@@ -700,6 +718,7 @@ def api_chat():
     ]
 
     try:
+        # Tool-calling loop
         for _ in range(3):
             completion = client.chat.completions.create(
                 model=model,
@@ -708,26 +727,23 @@ def api_chat():
                 tool_choice="auto",
             )
 
-            m = completion.choices[0].message
+            message = completion.choices[0].message
 
-            # Normal assistant response (no tool calls)
-            if not getattr(m, "tool_calls", None):
-                reply = _clean_text((m.content or "").strip())
-                if not reply:
-                    reply = "I can help—what are the two ICAO airports (like KCAK and KSRQ) and what day are you flying?"
-                return jsonify({"reply": reply}), 200
+            # If model answered normally, return it
+            if not message.tool_calls:
+                reply = (message.content or "").strip()
+                return jsonify({"reply": reply or "I’m not sure I understood — try giving two ICAO codes and a date."}), 200
 
-            # Append the assistant tool call message
+            # Otherwise execute tools and feed results back
             messages.append(
                 {
                     "role": "assistant",
-                    "content": m.content or "",
-                    "tool_calls": [tc.model_dump() for tc in m.tool_calls],
+                    "content": message.content or "",
+                    "tool_calls": [tc.model_dump() for tc in message.tool_calls],
                 }
             )
 
-            # Execute tools
-            for tc in m.tool_calls:
+            for tc in message.tool_calls:
                 name = tc.function.name
                 args_str = tc.function.arguments or "{}"
                 try:
@@ -756,10 +772,10 @@ def api_chat():
                     }
                 )
 
-        return jsonify({"reply": "I got stuck—try again with two ICAO codes and a date (today/tomorrow works)."}), 200
+        return jsonify({"reply": "I got stuck — can you rephrase with departure, destination, and a date?"}), 200
 
     except Exception as e:
-        # IMPORTANT: return JSON so your UI doesn't choke
+        # e.g. quota, auth, etc.
         return jsonify({"error": str(e)}), 500
 
 
