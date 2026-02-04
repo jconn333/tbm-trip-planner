@@ -27,7 +27,7 @@ except Exception:
     OpenAI = None
 
 # IMPORTANT: your repo uses "Templates" (capital T)
-app = Flask(__name__, template_folder="Templates")
+app = Flask(__name__, template_folder="templates")
 
 APP_NAME = "TBM Trip Planner"
 
