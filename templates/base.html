@@ -1,52 +1,178 @@
+{% set page_app_name = app_name if app_name is defined else "TBM Trip Planner" %}
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{% block title %}TBM Trip Planner{% endblock %}</title>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{% block title %}{{ page_app_name }}{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:rgba(255,255,255,0.06);
+      --panel2:rgba(255,255,255,0.08);
+      --stroke:rgba(255,255,255,0.12);
+      --text:rgba(255,255,255,0.92);
+      --muted:rgba(255,255,255,0.65);
+      --muted2:rgba(255,255,255,0.52);
+      --shadow:0 16px 44px rgba(0,0,0,0.42);
+      --accent:#6ea8fe;
+      --accent2:#7cf2c2;
+      --danger:#ff5c70;
+      --ok:#7cf2c2;
+      --border:rgba(255,255,255,0.12);
+      --sans:"Manrope","Avenir Next","Segoe UI",sans-serif;
+      --display:"Space Grotesk","Manrope","Avenir Next","Segoe UI",sans-serif;
+      --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+      --radius:18px;
+    }
 
-    <!-- Tailwind (no build step, great for fast iteration) -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{
+      margin:0;
+      font-family:var(--sans);
+      color:var(--text);
+      letter-spacing: 0.01em;
+      background:
+        radial-gradient(1200px 540px at 16% 12%, rgba(110,168,254,0.18), transparent 60%),
+        radial-gradient(900px 520px at 82% 26%, rgba(124,242,194,0.14), transparent 60%),
+        radial-gradient(900px 680px at 50% 100%, rgba(255,255,255,0.05), transparent 70%),
+        var(--bg);
+    }
 
-    <style>
-      html, body { height: 100%; }
-    </style>
-  </head>
+    .page{
+      max-width:1180px;
+      margin:0 auto;
+      padding:26px 18px 66px;
+      animation: pageIn 280ms ease-out;
+    }
+    @keyframes pageIn{
+      from{ opacity:0; transform: translateY(4px); }
+      to{ opacity:1; transform: translateY(0); }
+    }
 
-  <body class="min-h-full bg-slate-950 text-slate-100">
-    <!-- Top bar -->
-    <header class="border-b border-slate-800 bg-slate-950/70 backdrop-blur">
-      <div class="mx-auto max-w-5xl px-4 py-4 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <div class="h-9 w-9 rounded-xl bg-slate-800 flex items-center justify-center font-bold">
-            TBM
-          </div>
-          <div>
-            <div class="text-lg font-semibold leading-tight">TBM Trip Planner</div>
-            <div class="text-xs text-slate-400">Planning estimates for partner trips</div>
-          </div>
+    .topbar{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:16px;
+      flex-wrap:wrap;
+    }
+
+    .brand{ display:flex; align-items:center; gap:12px; min-width: 0; }
+    .logo{
+      width:38px;
+      height:38px;
+      border-radius:14px;
+      background:linear-gradient(135deg, rgba(110,168,254,0.95), rgba(124,242,194,0.88));
+      box-shadow:0 10px 24px rgba(110,168,254,0.18);
+      flex:0 0 auto;
+    }
+    .brandText{ min-width: 0; }
+    .brandText h1{
+      margin:0;
+      font-family:var(--display);
+      font-size:19px;
+      font-weight:700;
+      letter-spacing:0.1px;
+      line-height:1.2;
+    }
+    .brandText .sub{
+      margin-top:3px;
+      font-size:12.5px;
+      color:var(--muted);
+      line-height:1.35;
+      overflow-wrap:anywhere;
+    }
+
+    .headerRight{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .siteNav{ display:flex; align-items:center; gap:8px; }
+    .siteNav a{
+      text-decoration:none;
+      color:var(--muted);
+      font-size:12.5px;
+      border:1px solid rgba(255,255,255,0.12);
+      background:rgba(255,255,255,0.04);
+      border-radius:999px;
+      padding:7px 10px;
+      transition: border-color .16s ease, background .16s ease, color .16s ease;
+    }
+    .siteNav a:hover{ color:var(--text); background:rgba(255,255,255,0.08); }
+    .siteNav a.active{
+      color:#f4fbff;
+      border-color: rgba(124,242,194,0.52);
+      background: linear-gradient(135deg, rgba(110,168,254,0.22), rgba(124,242,194,0.18));
+    }
+
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 11px;
+      border-radius:999px;
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.05);
+      color:var(--muted);
+      font-size:12.5px;
+      white-space:nowrap;
+      height:fit-content;
+    }
+    .dot{ width:8px; height:8px; border-radius:99px; background:var(--ok); display:inline-block; }
+
+    .footer{
+      margin-top:18px;
+      border-top:1px solid rgba(255,255,255,0.08);
+      padding-top:10px;
+      color:var(--muted2);
+      font-size:12px;
+      line-height:1.35;
+    }
+
+    @media (max-width: 720px){
+      .page{ padding:20px 12px 54px; }
+      .topbar{ margin-bottom:12px; }
+      .headerRight{ width:100%; justify-content:space-between; }
+      .siteNav a{ font-size:12px; }
+    }
+
+    {% block page_styles %}{% endblock %}
+  </style>
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+  <div class="page">
+    {% set _path = request.path if request is defined else "" %}
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"></div>
+        <div class="brandText">
+          <h1>{{ page_app_name }}</h1>
+          <div class="sub">{% block header_subtitle %}Planning estimates for partner trips.{% endblock %}</div>
         </div>
-
-        <div class="flex items-center gap-4 text-sm">
-          <a href="/" class="text-slate-300 hover:text-white transition">Planner</a>
-          <a href="/chat" class="text-slate-300 hover:text-white transition">Chat</a>
-          <div class="hidden sm:block text-xs text-slate-500">
-            Not for operational flight planning
-          </div>
-        </div>
+      </div>
+      <div class="headerRight">
+        <nav class="siteNav" aria-label="Primary navigation">
+          <a href="/" class="{% if _path == '/' or _path.startswith('/estimate') %}active{% endif %}" aria-current="{% if _path == '/' or _path.startswith('/estimate') %}page{% endif %}">Planner</a>
+        </nav>
+        {% block header_badge %}
+          <div class="badge" title="App status"><span class="dot" aria-hidden="true"></span>Ready</div>
+        {% endblock %}
       </div>
     </header>
 
-    <!-- Page container -->
-    <main class="mx-auto max-w-5xl px-4 py-10">
+    <main>
       {% block content %}{% endblock %}
     </main>
 
-    <!-- Footer -->
-    <footer class="mx-auto max-w-5xl px-4 pb-10 text-xs text-slate-500">
-      <div class="border-t border-slate-800 pt-6">
-        Estimates use great-circle distance and winds aloft. Always verify with official flight planning tools.
-      </div>
+    <footer class="footer">
+      Estimates use great-circle distance and winds aloft. Always verify with official flight planning tools.
     </footer>
-  </body>
+  </div>
+
+  {% block scripts %}{% endblock %}
+</body>
 </html>

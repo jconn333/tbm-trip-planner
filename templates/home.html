@@ -1,70 +1,9 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>TBM Trip Planner</title>
-
-  <style>
-    :root{
-      --bg:#0b1220;
-      --panel:rgba(255,255,255,0.06);
-      --panel2:rgba(255,255,255,0.08);
-      --stroke:rgba(255,255,255,0.12);
-      --text:rgba(255,255,255,0.92);
-      --muted:rgba(255,255,255,0.65);
-      --muted2:rgba(255,255,255,0.52);
-      --shadow:0 16px 44px rgba(0,0,0,0.42);
-      --accent:#6ea8fe;
-      --accent2:#7cf2c2;
-      --danger:#ff5c70;
-      --ok:#7cf2c2;
-      --sans:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";
-      --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
-      --radius:18px;
-    }
-
-    *{ box-sizing:border-box; }
-    html,body{ height:100%; }
-
-    body{
-      margin:0;
-      font-family:var(--sans);
-      color:var(--text);
-      background:
-        radial-gradient(1200px 540px at 16% 12%, rgba(110,168,254,0.18), transparent 60%),
-        radial-gradient(900px 520px at 82% 26%, rgba(124,242,194,0.14), transparent 60%),
-        radial-gradient(900px 680px at 50% 100%, rgba(255,255,255,0.05), transparent 70%),
-        var(--bg);
-    }
-
-    .wrap{ max-width:980px; margin:0 auto; padding:26px 16px 66px; }
-
-    /* Header */
-    .topbar{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:16px; }
-    .brand{ display:flex; align-items:center; gap:12px; }
-    .logo{
-      width:38px; height:38px; border-radius:14px;
-      background:linear-gradient(135deg, rgba(110,168,254,0.95), rgba(124,242,194,0.88));
-      box-shadow:0 10px 24px rgba(110,168,254,0.18);
-      flex:0 0 auto;
-    }
-    .brand h1{ margin:0; font-size:17px; letter-spacing:0.2px; line-height:1.2; }
-    .brand .sub{ margin-top:3px; font-size:12.5px; color:var(--muted); }
-    .badge{
-      display:inline-flex; align-items:center; gap:8px;
-      padding:8px 11px; border-radius:999px;
-      border:1px solid var(--stroke);
-      background:rgba(255,255,255,0.05);
-      color:var(--muted);
-      font-size:12.5px;
-      white-space:nowrap;
-      height:fit-content;
-    }
-    .dot{ width:8px; height:8px; border-radius:99px; background:var(--ok); display:inline-block; }
-
-    /* Layout */
-    .grid{ display:grid; grid-template-columns: 1.06fr 0.94fr; gap:14px; }
+{% extends "base.html" %}
+{% block title %}{{ app_name }}{% endblock %}
+{% block header_subtitle %}Use the form or just ask naturally.{% endblock %}
+{% block header_badge %}<div class="badge" title="App status"><span class="dot" aria-hidden="true"></span>Planner</div>{% endblock %}
+{% block page_styles %}
+    .grid{ display:grid; grid-template-columns: 1.05fr 0.95fr; gap:16px; }
     @media (max-width:920px){ .grid{ grid-template-columns:1fr; } }
 
     /* Cards */
@@ -80,9 +19,9 @@
       border-bottom:1px solid rgba(255,255,255,0.08);
       background:rgba(0,0,0,0.10);
     }
-    .cardHeader h2{ margin:0; font-size:14px; letter-spacing:0.2px; }
-    .cardHeader p{ margin:6px 0 0; color:var(--muted); font-size:12.8px; line-height:1.35; }
-    .cardBody{ padding:16px; }
+    .cardHeader h2{ margin:0; font-size:15px; font-family: var(--display); letter-spacing:0.15px; }
+    .cardHeader p{ margin:6px 0 0; color:var(--muted); font-size:13px; line-height:1.35; }
+    .cardBody{ padding:17px; }
 
     .error{
       margin:0 0 12px;
@@ -103,22 +42,24 @@
     }
     @media (max-width:560px){ form .row{ grid-template-columns:1fr; } }
 
-    .field label{ display:block; margin:0 0 6px; font-size:12px; color:var(--muted); }
+    .field label{ display:block; margin:0 0 6px; font-size:12px; color:var(--muted); font-weight: 600; }
 
     .inputWrap{ position:relative; }
 
-    input,select,textarea{
+    input:not([type="checkbox"]):not([type="radio"]),select,textarea{
       width:100%;
       padding:11px 12px;
       border-radius:14px;
       border:1px solid rgba(255,255,255,0.14);
-      background:rgba(255,255,255,0.06);
+      background:linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
       color:var(--text);
       outline:none;
       font-size:14px;
+      font-weight: 550;
+      transition: border-color .14s ease, box-shadow .14s ease, background .14s ease;
     }
-    input::placeholder,textarea::placeholder{ color:rgba(255,255,255,0.38); }
-    input:focus,select:focus,textarea:focus{
+    input:not([type="checkbox"]):not([type="radio"])::placeholder,textarea::placeholder{ color:rgba(255,255,255,0.38); }
+    input:not([type="checkbox"]):not([type="radio"]):focus,select:focus,textarea:focus{
       border-color:rgba(110,168,254,0.55);
       box-shadow:0 0 0 4px rgba(110,168,254,0.12);
     }
@@ -141,7 +82,7 @@
     .btn{
       appearance:none;
       border:1px solid rgba(255,255,255,0.14);
-      background:rgba(255,255,255,0.08);
+      background:linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.05));
       color:var(--text);
       padding:10px 13px;
       border-radius:14px;
@@ -149,15 +90,17 @@
       font-weight:650;
       font-size:13.5px;
       letter-spacing:0.15px;
+      transition: border-color .14s ease, background .14s ease, transform .12s ease;
     }
-    .btn:hover{ background:rgba(255,255,255,0.11); }
+    .btn:hover{ background:rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.22); }
+    .btn:active{ transform: translateY(1px); }
     .btn:disabled{ opacity:0.55; cursor:not-allowed; }
 
     .btnPrimary{
       border:1px solid rgba(110,168,254,0.62);
       background:linear-gradient(135deg, rgba(110,168,254,0.92), rgba(124,242,194,0.50));
       color:#0b1220;
-      box-shadow:0 10px 20px rgba(110,168,254,0.14);
+      box-shadow:0 10px 20px rgba(110,168,254,0.18);
     }
 
     .micro{ color:var(--muted2); font-size:12px; line-height:1.35; }
@@ -192,90 +135,222 @@
     .suggestions button:hover{ background:rgba(110,168,254,0.10); }
     .suggestions button:last-child{ border-bottom:0; }
 
-    /* Chat */
-    .chatThread{
-      height:308px;
-      overflow:auto;
-      padding:12px;
-      background:rgba(255,255,255,0.035);
-      border:1px solid rgba(255,255,255,0.10);
-      border-radius:16px;
+    .whatIf {
+      margin-top: 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      background: rgba(255,255,255,0.03);
+      padding: 10px 12px;
     }
-    .bubbleRow{ display:flex; margin:9px 0; gap:10px; }
-    .bubbleRow.me{ justify-content:flex-end; }
-    .bubble{
-      max-width:86%;
-      border-radius:16px;
-      padding:10px 12px;
-      border:1px solid rgba(255,255,255,0.10);
-      white-space:pre-wrap;
-      line-height:1.35;
-      font-size:14px;
+    .whatIf summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
     }
-    .bubble.me{ background:rgba(255,255,255,0.085); }
-    .bubble.ai{ background:rgba(110,168,254,0.09); border-color:rgba(110,168,254,0.20); }
-
-    .chatForm{ display:flex; gap:10px; margin-top:10px; align-items:flex-end; }
-    .chatForm textarea{ min-height:44px; max-height:120px; resize:none; padding:11px 12px; }
-
-    .chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-    .chip{
-      border:1px solid rgba(255,255,255,0.14);
-      background:rgba(255,255,255,0.05);
-      color:var(--muted);
-      padding:7px 10px;
-      border-radius:999px;
-      font-size:12.5px;
-      cursor:pointer;
-      user-select:none;
+    .whatIf[open] summary {
+      margin-bottom: 10px;
     }
-    .chip:hover{ background:rgba(255,255,255,0.08); color:var(--text); }
-
-    .status{ margin-top:8px; font-size:12.5px; color:var(--muted); min-height:18px; }
-
-    .typing{ display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; }
-    .dots{ display:inline-flex; gap:3px; align-items:center; }
-    .dotB{
-      width:6px; height:6px; border-radius:99px;
-      background:rgba(255,255,255,0.55);
-      animation:bounce 1.2s infinite ease-in-out;
+    .assumptionGrid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px 12px;
     }
-    .dotB:nth-child(2){ animation-delay:0.15s; }
-    .dotB:nth-child(3){ animation-delay:0.30s; }
-    @keyframes bounce{
-      0%,80%,100%{ transform:translateY(0); opacity:0.55; }
-      40%{ transform:translateY(-4px); opacity:0.95; }
+    .sliderWrap {
+      margin-top: 8px;
+      display: grid;
+      gap: 4px;
     }
-
-    .kbd{
-      font-family:var(--mono);
-      font-size:11px;
-      border:1px solid rgba(255,255,255,0.14);
-      background:rgba(255,255,255,0.05);
-      padding:2px 6px;
-      border-radius:7px;
-      color:var(--muted);
+    .sliderRow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
-  </style>
-</head>
-
-<body>
-  <div class="wrap">
-    <div class="topbar">
-      <div class="brand">
-        <div class="logo" aria-hidden="true"></div>
-        <div>
-          <h1>TBM Trip Planner</h1>
-          <div class="sub">Use the form or just ask naturally.</div>
-        </div>
-      </div>
-
-      <div class="badge" title="Local dev server">
-        <span class="dot" aria-hidden="true"></span>
-        Local
-      </div>
-    </div>
-
+    .assumptionSlider {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+    .sliderValue {
+      font-size: 11px;
+      color: var(--muted2);
+      min-width: 62px;
+      text-align: right;
+      font-family: var(--mono);
+    }
+    .nearbyLookup {
+      margin-top: 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      background: rgba(255,255,255,0.03);
+      padding: 10px 12px;
+    }
+    .nearbyHeader {
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .nearbyRow {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+    .nearbyFilters {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: minmax(120px, 1.1fr) repeat(3, minmax(116px, 1fr));
+      gap: 8px;
+      align-items: stretch;
+    }
+    .nearbyFilters .field {
+      min-width: 0;
+    }
+    .nearbyFilters .field > label {
+      display: block;
+      margin: 0 0 4px;
+      font-size: 11px;
+      color: var(--muted2);
+    }
+    .nearbyToggle {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 10px;
+      min-height: 50px;
+      padding: 0 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      background:
+        radial-gradient(120% 120% at 8% 0%, rgba(110,168,254,0.15), rgba(110,168,254,0) 55%),
+        rgba(255,255,255,0.03);
+      color: rgba(233,240,255,0.92);
+      cursor: pointer;
+      user-select: none;
+      transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
+    }
+    .nearbyFilters > .nearbyToggle {
+      margin: 0;
+    }
+    .nearbyToggle:hover {
+      border-color: rgba(110,168,254,0.50);
+      background:
+        radial-gradient(120% 120% at 8% 0%, rgba(110,168,254,0.20), rgba(110,168,254,0) 55%),
+        rgba(255,255,255,0.05);
+      box-shadow: 0 8px 16px rgba(4,10,20,0.22);
+    }
+    .nearbyToggle:focus-within {
+      border-color: rgba(124,242,194,0.68);
+      box-shadow: 0 0 0 4px rgba(124,242,194,0.16);
+    }
+    .nearbyToggle input[type="checkbox"] {
+      /* Visually hidden but still keyboard/screen-reader accessible */
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+      appearance: none;
+      -webkit-appearance: none;
+      pointer-events: none;
+    }
+    .toggleMark {
+      width: 38px;
+      height: 24px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.34);
+      background: rgba(255,255,255,0.10);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.20);
+      transition: all .18s ease;
+      grid-column: 2;
+      position: relative;
+    }
+    .toggleMark::after {
+      content: "";
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      left: 3px;
+      top: 3px;
+      border-radius: 50%;
+      background: #f4f8ff;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+      transition: transform .18s ease;
+    }
+    .nearbyToggle input[type="checkbox"]:checked ~ .toggleLabel {
+      color: #f8fcff;
+    }
+    .nearbyToggle input[type="checkbox"]:checked + .toggleMark {
+      border-color: rgba(124,242,194,0.90);
+      background: linear-gradient(140deg, rgba(50,143,245,0.95), rgba(124,242,194,0.92));
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,0.22),
+        0 0 0 4px rgba(110,168,254,0.15);
+    }
+    .nearbyToggle input[type="checkbox"]:checked + .toggleMark::after {
+      transform: translateX(14px);
+    }
+    .nearbyToggle input[type="checkbox"]:focus-visible + .toggleMark {
+      box-shadow: 0 0 0 4px rgba(110,168,254,0.24);
+    }
+    .toggleLabel {
+      grid-column: 1;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.1px;
+      color: inherit;
+      line-height: 1.2;
+    }
+    .nearbyResults {
+      margin-top: 8px;
+      display: grid;
+      gap: 6px;
+    }
+    .nearbyItem {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      border-radius: 12px;
+      padding: 8px 10px;
+    }
+    .nearbyDist {
+      font-size: 12px;
+      color: var(--muted2);
+      font-family: var(--mono);
+    }
+    .nearbyUse {
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.08);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 6px 9px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .nearbyMeta {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted2);
+    }
+    .nearbyDetails {
+      grid-column: 1 / -1;
+      font-size: 11px;
+      color: var(--muted2);
+      line-height: 1.3;
+    }
+    @media (max-width: 560px) {
+      .assumptionGrid { grid-template-columns: 1fr; }
+      .nearbyFilters { grid-template-columns: 1fr 1fr; }
+      .nearbyItem { grid-template-columns: 1fr; }
+    }
+{% endblock %}
+{% block content %}
     <div class="grid">
       <!-- LEFT: FORM -->
       <div class="card">
@@ -294,7 +369,7 @@
               <div class="field">
                 <label for="dep">Departure</label>
                 <div class="inputWrap">
-                  <input id="dep" name="dep_icao" placeholder="KCAK, Akron, Cleveland…" />
+                  <input id="dep" name="dep_icao" placeholder="KCAK, Akron, Cleveland…" value="{{ form_values.dep or '' }}" />
                   <div id="depSug" class="suggestions" role="listbox" aria-label="Departure suggestions"></div>
                 </div>
               </div>
@@ -302,7 +377,7 @@
               <div class="field">
                 <label for="dest">Destination</label>
                 <div class="inputWrap">
-                  <input id="dest" name="dest_icao" placeholder="KSRQ, Sarasota, Tampa…" />
+                  <input id="dest" name="dest_icao" placeholder="KSRQ, Sarasota, Tampa…" value="{{ form_values.dest or '' }}" />
                   <div id="destSug" class="suggestions" role="listbox" aria-label="Destination suggestions"></div>
                 </div>
               </div>
@@ -311,13 +386,13 @@
             <div class="row">
               <div class="field">
                 <label for="depart_date">Depart</label>
-                <input id="depart_date" name="depart_date" type="date" />
+                <input id="depart_date" name="depart_date" type="date" value="{{ form_values.depart_date or '' }}" />
                 <div id="depart_help" class="help"></div>
               </div>
 
               <div class="field">
                 <label for="return_date">Return (optional)</label>
-                <input id="return_date" name="return_date" type="date" />
+                <input id="return_date" name="return_date" type="date" value="{{ form_values.return_date or '' }}" />
                 <div id="return_help" class="help"></div>
               </div>
             </div>
@@ -326,8 +401,8 @@
               <div class="field">
                 <label for="trip_type">Trip type</label>
                 <select id="trip_type" name="trip_type">
-                  <option value="oneway">One-way</option>
-                  <option value="roundtrip">Round trip</option>
+                  <option value="oneway" {% if (form_values.trip_type or "oneway") == "oneway" %}selected{% endif %}>One-way</option>
+                  <option value="roundtrip" {% if form_values.trip_type == "roundtrip" %}selected{% endif %}>Round trip</option>
                 </select>
                 <div class="help" id="type_help"></div>
               </div>
@@ -340,44 +415,107 @@
                 </div>
               </div>
             </div>
+
+            <details class="whatIf">
+              <summary>What-if assumptions (optional)</summary>
+              <div class="assumptionGrid">
+                <div class="field">
+                  <label for="tas_typical">Typical TAS (kt)</label>
+                  <input id="tas_typical" name="tas_typical" type="number" step="1" min="120" max="450" value="{{ assumption_values.tas_typical }}" />
+                </div>
+                <div class="field">
+                  <label for="tas_conservative">Conservative TAS (kt)</label>
+                  <input id="tas_conservative" name="tas_conservative" type="number" step="1" min="120" max="450" value="{{ assumption_values.tas_conservative }}" />
+                </div>
+                <div class="field">
+                  <label for="routing_typical">Typical routing multiplier</label>
+                  <input id="routing_typical" name="routing_typical" type="number" step="0.01" min="1" max="1.5" value="{{ assumption_values.routing_typical }}" />
+                </div>
+                <div class="field">
+                  <label for="routing_conservative">Conservative routing multiplier</label>
+                  <input id="routing_conservative" name="routing_conservative" type="number" step="0.01" min="1" max="1.8" value="{{ assumption_values.routing_conservative }}" />
+                </div>
+                <div class="field">
+                  <label for="overhead_typical_min">Typical overhead (min)</label>
+                  <input id="overhead_typical_min" name="overhead_typical_min" type="number" step="1" min="0" max="120" value="{{ assumption_values.overhead_typical_min }}" />
+                </div>
+                <div class="field">
+                  <label for="overhead_conservative_min">Conservative overhead (min)</label>
+                  <input id="overhead_conservative_min" name="overhead_conservative_min" type="number" step="1" min="0" max="120" value="{{ assumption_values.overhead_conservative_min }}" />
+                </div>
+                <div class="field">
+                  <label for="mgmt_fee_per_hr">Management fee ($/hr)</label>
+                  <input id="mgmt_fee_per_hr" name="mgmt_fee_per_hr" type="number" step="1" min="0" max="5000" value="{{ assumption_values.mgmt_fee_per_hr }}" />
+                </div>
+                <div class="field">
+                  <label for="maint_reserve_per_hr">Maintenance reserve ($/hr)</label>
+                  <input id="maint_reserve_per_hr" name="maint_reserve_per_hr" type="number" step="1" min="0" max="5000" value="{{ assumption_values.maint_reserve_per_hr }}" />
+                </div>
+                <div class="field">
+                  <label for="engine_reserve_per_hr">Engine reserve ($/hr)</label>
+                  <input id="engine_reserve_per_hr" name="engine_reserve_per_hr" type="number" step="1" min="0" max="5000" value="{{ assumption_values.engine_reserve_per_hr }}" />
+                </div>
+                <div class="field">
+                  <label for="fuel_price_per_gal">Fuel price ($/gal)</label>
+                  <input id="fuel_price_per_gal" name="fuel_price_per_gal" type="number" step="0.01" min="0.5" max="25" value="{{ assumption_values.fuel_price_per_gal }}" />
+                </div>
+                <div class="field">
+                  <label for="fuel_burn_gph">Fuel burn (gph)</label>
+                  <input id="fuel_burn_gph" name="fuel_burn_gph" type="number" step="1" min="10" max="250" value="{{ assumption_values.fuel_burn_gph }}" />
+                </div>
+              </div>
+            </details>
+
           </form>
         </div>
       </div>
 
-      <!-- RIGHT: CHAT -->
+      <!-- RIGHT: AIRPORT LOOKUP -->
       <div class="card">
         <div class="cardHeader">
-          <h2>Or just chat</h2>
-          <p>Plain text responses, more like ChatGPT.</p>
+          <h2>Airport lookup</h2>
+          <p>Search by city/state or full address, then filter nearby airports.</p>
         </div>
 
         <div class="cardBody">
-          <div id="chatThread" class="chatThread" aria-live="polite">
-            <div class="typing" style="opacity:.9;">
-              Try: “How much to fly from KCAK to KSRQ tomorrow?”
+          <div class="nearbyLookup">
+            <p class="nearbyHeader">Find nearest airports by address</p>
+            <div class="nearbyRow">
+              <div class="inputWrap">
+              <input id="addressLookupInput" type="text" placeholder="City, ST or full address (e.g., Akron, OH)" />
+                <div id="addressLookupSug" class="suggestions" role="listbox" aria-label="Address suggestions"></div>
+              </div>
+              <button id="addressLookupBtn" class="btn" type="button">Find airports</button>
             </div>
-          </div>
-
-          <div class="chips" aria-label="Example prompts">
-            <div class="chip" data-msg="How much would it cost to fly from KCAK to KSRQ tomorrow?">KCAK → KSRQ tomorrow</div>
-            <div class="chip" data-msg="Round trip from KCAK to KSRQ leaving tomorrow and returning the next day.">Round trip tomorrow</div>
-            <div class="chip" data-msg="What’s the block time from KCAK to KSRQ today?">Block time</div>
-          </div>
-
-          <form id="chatForm" class="chatForm">
-            <textarea id="chatInput" placeholder="Ask about a trip…" spellcheck="false"></textarea>
-            <button id="chatSend" class="btn btnPrimary" type="submit">Send</button>
-          </form>
-
-          <div id="chatStatus" class="status"></div>
-          <div class="micro">
-            <span class="kbd">Enter</span> to send · <span class="kbd">Shift</span>+<span class="kbd">Enter</span> for a new line
+            <div class="nearbyFilters">
+              <div class="field">
+                <label for="minRunwayFt">Min runway (ft)</label>
+                <input id="minRunwayFt" type="number" min="0" max="30000" step="100" value="4000" />
+              </div>
+              <label class="nearbyToggle">
+                <input id="jetFuelOnly" type="checkbox" />
+                <span class="toggleMark" aria-hidden="true"></span>
+                <span class="toggleLabel">Jet fuel only</span>
+              </label>
+              <label class="nearbyToggle">
+                <input id="pavedOnly" type="checkbox" />
+                <span class="toggleMark" aria-hidden="true"></span>
+                <span class="toggleLabel">Paved only</span>
+              </label>
+              <label class="nearbyToggle">
+                <input id="toweredOnly" type="checkbox" />
+                <span class="toggleMark" aria-hidden="true"></span>
+                <span class="toggleLabel">Towered only</span>
+              </label>
+            </div>
+            <div id="addressLookupMeta" class="nearbyMeta"></div>
+            <div id="addressLookupResults" class="nearbyResults"></div>
           </div>
         </div>
       </div>
     </div>
-  </div>
-
+{% endblock %}
+{% block scripts %}
   <script>
     // ---------- Airport autocomplete ----------
     function setupAirportAutocomplete(inputEl, sugEl) {
@@ -432,6 +570,214 @@
     const destEl = document.getElementById("dest");
     setupAirportAutocomplete(depEl, document.getElementById("depSug"));
     setupAirportAutocomplete(destEl, document.getElementById("destSug"));
+
+    // ---------- Address -> nearest airports ----------
+    const addressLookupInput = document.getElementById("addressLookupInput");
+    const addressLookupSug = document.getElementById("addressLookupSug");
+    const addressLookupBtn = document.getElementById("addressLookupBtn");
+    const addressLookupMeta = document.getElementById("addressLookupMeta");
+    const addressLookupResults = document.getElementById("addressLookupResults");
+    const minRunwayFtEl = document.getElementById("minRunwayFt");
+    const jetFuelOnlyEl = document.getElementById("jetFuelOnly");
+    const pavedOnlyEl = document.getElementById("pavedOnly");
+    const toweredOnlyEl = document.getElementById("toweredOnly");
+
+    function setupAddressAutocomplete(inputEl, sugEl) {
+      let debounceTimer = null;
+
+      function close(){ sugEl.style.display="none"; sugEl.innerHTML=""; }
+      function open(){ sugEl.style.display="block"; }
+
+      async function fetchAddresses(q){
+        const res = await fetch(`/api/address-suggest?q=${encodeURIComponent(q)}`);
+        if(!res.ok) return [];
+        return await res.json();
+      }
+
+      function pick(item){
+        inputEl.value = item.display_name;
+        close();
+        inputEl.focus();
+      }
+
+      inputEl.addEventListener("input", () => {
+        const q = (inputEl.value || "").trim();
+        clearTimeout(debounceTimer);
+        if(q.length < 3){ close(); return; }
+
+        debounceTimer = setTimeout(async () => {
+          const items = await fetchAddresses(q);
+          if(!items || items.length === 0){ close(); return; }
+          sugEl.innerHTML = "";
+          items.forEach(it => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.textContent = it.display_name;
+            btn.addEventListener("click", () => pick(it));
+            sugEl.appendChild(btn);
+          });
+          open();
+        }, 220);
+      });
+
+      inputEl.addEventListener("blur", () => setTimeout(close, 120));
+      inputEl.addEventListener("focus", () => {
+        const q = (inputEl.value || "").trim();
+        if(q.length >= 3 && sugEl.innerHTML.trim()) open();
+      });
+      document.addEventListener("keydown", (e) => { if(e.key === "Escape") close(); });
+    }
+
+    setupAddressAutocomplete(addressLookupInput, addressLookupSug);
+
+    function renderNearestAirports(items) {
+      addressLookupResults.innerHTML = "";
+      if (!items || items.length === 0) {
+        addressLookupResults.innerHTML = '<div class="micro">No nearby airports found.</div>';
+        return;
+      }
+
+      items.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "nearbyItem";
+
+        const label = document.createElement("div");
+        label.textContent = item.label;
+
+        const dist = document.createElement("div");
+        dist.className = "nearbyDist";
+        dist.textContent = `${item.distance_nm} nm`;
+
+        const details = document.createElement("div");
+        details.className = "nearbyDetails";
+        const detailsBits = [];
+        if (item.max_runway_ft) detailsBits.push(`Longest runway ${item.max_runway_ft.toLocaleString()} ft`);
+        if (item.jet_fuel) detailsBits.push("Jet fuel");
+        if (item.paved_runway) detailsBits.push("Paved");
+        if (item.towered) detailsBits.push("Towered");
+        details.textContent = detailsBits.length ? detailsBits.join(" · ") : "No ops details available";
+
+        const useBtn = document.createElement("button");
+        useBtn.type = "button";
+        useBtn.className = "nearbyUse";
+        useBtn.textContent = "Use";
+        useBtn.addEventListener("click", () => {
+          if (!depEl.value) depEl.value = item.icao;
+          else if (!destEl.value) destEl.value = item.icao;
+          else destEl.value = item.icao;
+          depEl.dispatchEvent(new Event("input"));
+          destEl.dispatchEvent(new Event("input"));
+        });
+
+        row.appendChild(label);
+        row.appendChild(dist);
+        row.appendChild(useBtn);
+        row.appendChild(details);
+        addressLookupResults.appendChild(row);
+      });
+    }
+
+    async function lookupNearestAirports() {
+      const address = (addressLookupInput.value || "").trim();
+      if (address.length < 3) {
+        addressLookupMeta.textContent = "Enter at least 3 characters.";
+        addressLookupResults.innerHTML = "";
+        return;
+      }
+
+      addressLookupBtn.disabled = true;
+      addressLookupMeta.textContent = "Searching…";
+      addressLookupResults.innerHTML = "";
+      try {
+        const params = new URLSearchParams({
+          address,
+          min_runway_ft: String(parseInt(minRunwayFtEl.value || "0", 10) || 0),
+          jet_fuel_only: jetFuelOnlyEl.checked ? "true" : "false",
+          paved_only: pavedOnlyEl.checked ? "true" : "false",
+          towered_only: toweredOnlyEl.checked ? "true" : "false",
+          limit: "8",
+        });
+        const res = await fetch(`/api/nearest-airports?${params.toString()}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          addressLookupMeta.textContent = data.error || `Lookup failed (${res.status})`;
+          return;
+        }
+        const f = data.filters || {};
+        const filterText = [
+          `min runway ${Number(f.min_runway_ft || 0).toLocaleString()} ft`,
+          f.jet_fuel_only ? "jet fuel" : null,
+          f.paved_only ? "paved only" : null,
+          f.towered_only ? "towered only" : null,
+        ].filter(Boolean).join(", ");
+        addressLookupMeta.textContent = `Using: ${data.resolved_address} · Filters: ${filterText}`;
+        renderNearestAirports(data.airports || []);
+      } catch (_e) {
+        addressLookupMeta.textContent = "Lookup failed. Please try again.";
+      } finally {
+        addressLookupBtn.disabled = false;
+      }
+    }
+
+    addressLookupBtn.addEventListener("click", lookupNearestAirports);
+    addressLookupInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        lookupNearestAirports();
+      }
+    });
+
+    // ---------- What-if sliders ----------
+    function setupAssumptionSliders() {
+      const numericInputs = document.querySelectorAll(".assumptionGrid input[type='number']");
+      numericInputs.forEach((numInput) => {
+        const min = numInput.getAttribute("min");
+        const max = numInput.getAttribute("max");
+        const step = numInput.getAttribute("step") || "1";
+        const value = numInput.value || "";
+        if (min === null || max === null || value === "") return;
+
+        const wrap = document.createElement("div");
+        wrap.className = "sliderWrap";
+        const row = document.createElement("div");
+        row.className = "sliderRow";
+
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.className = "assumptionSlider";
+        slider.min = min;
+        slider.max = max;
+        slider.step = step;
+        slider.value = value;
+
+        const valueLabel = document.createElement("div");
+        valueLabel.className = "sliderValue";
+
+        function formatValue(v) {
+          return Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
+        }
+
+        function syncFromSlider() {
+          numInput.value = slider.value;
+          valueLabel.textContent = formatValue(slider.value);
+        }
+
+        function syncFromNumber() {
+          slider.value = numInput.value;
+          valueLabel.textContent = formatValue(numInput.value || slider.value);
+        }
+
+        syncFromNumber();
+        slider.addEventListener("input", syncFromSlider);
+        numInput.addEventListener("input", syncFromNumber);
+
+        row.appendChild(slider);
+        row.appendChild(valueLabel);
+        wrap.appendChild(row);
+        numInput.insertAdjacentElement("afterend", wrap);
+      });
+    }
+    setupAssumptionSliders();
 
     // ---------- Date helpers ----------
     const departInput = document.getElementById("depart_date");
@@ -545,7 +891,15 @@
     })();
 
     departInput.addEventListener("change", updateDateHelpers);
-    returnInput.addEventListener("change", updateDateHelpers);
+    function autoSelectRoundtripOnReturnDate() {
+      if (returnInput.value && tripTypeEl.value !== "roundtrip") {
+        tripTypeEl.value = "roundtrip";
+      }
+      updateDateHelpers();
+    }
+
+    returnInput.addEventListener("change", autoSelectRoundtripOnReturnDate);
+    returnInput.addEventListener("input", autoSelectRoundtripOnReturnDate);
     tripTypeEl.addEventListener("change", updateDateHelpers);
 
     // Click-anywhere date picker (wrapper click)
@@ -569,207 +923,6 @@
     enableFullClickDatePicker("depart_date");
     enableFullClickDatePicker("return_date");
 
-    // ---------- Chat ----------
-    const thread = document.getElementById("chatThread");
-    const form = document.getElementById("chatForm");
-    const input = document.getElementById("chatInput");
-    const sendBtn = document.getElementById("chatSend");
-    const status = document.getElementById("chatStatus");
-
-    function scrollToBottom(){ thread.scrollTop = thread.scrollHeight; }
-
-    function clearPlaceholderIfNeeded(){
-      if(thread.children.length === 1 && thread.textContent.includes("Try:")){
-        thread.innerHTML = "";
-      }
-    }
-
-    function addBubble(text, who){
-      const row = document.createElement("div");
-      row.className = "bubbleRow " + (who === "me" ? "me" : "ai");
-
-      const bubble = document.createElement("div");
-      bubble.className = "bubble " + (who === "me" ? "me" : "ai");
-      bubble.textContent = text; // plain text
-
-      row.appendChild(bubble);
-      thread.appendChild(row);
-      scrollToBottom();
-    }
-
-    function showTyping(){
-      const row = document.createElement("div");
-      row.className = "bubbleRow ai";
-      row.id = "typingRow";
-
-      const bubble = document.createElement("div");
-      bubble.className = "bubble ai";
-      bubble.style.display = "inline-flex";
-      bubble.style.alignItems = "center";
-      bubble.style.gap = "8px";
-
-      const label = document.createElement("span");
-      label.className = "typing";
-      label.textContent = "Thinking";
-
-      const dots = document.createElement("span");
-      dots.className = "dots";
-      dots.innerHTML = '<span class="dotB"></span><span class="dotB"></span><span class="dotB"></span>';
-
-      bubble.appendChild(label);
-      bubble.appendChild(dots);
-      row.appendChild(bubble);
-      thread.appendChild(row);
-      scrollToBottom();
-    }
-
-    function hideTyping(){
-      const el = document.getElementById("typingRow");
-      if(el) el.remove();
-    }
-
-    function setBusy(b){
-      sendBtn.disabled = b;
-      input.disabled = b;
-      if(b) status.textContent = "";
-    }
-
-    // ---- Chat → Form sync (airports, trip type, dates) ----
-    function extractICAOCodes(text){
-      const m = (text || "").toUpperCase().match(/\bK[A-Z0-9]{3}\b/g);
-      return m ? Array.from(new Set(m)) : [];
-    }
-
-    function inferTripType(text){
-      const t = (text || "").toLowerCase();
-      if(t.includes("round trip") || t.includes("roundtrip") || t.includes("returning") || t.includes("return trip")){
-        return "roundtrip";
-      }
-      return null;
-    }
-
-    function inferReturnDate(text, departDate){
-      const t = (text || "").toLowerCase();
-      if(t.includes("next day") || t.includes("the next day") || t.includes("day after")){
-        // if "day after tomorrow" exists, parseNaturalDateFromText will catch it. This is for return phrasing.
-        if(departDate){
-          const d = new Date(departDate);
-          d.setDate(d.getDate()+1);
-          return startOfDay(d);
-        }
-      }
-      return null;
-    }
-
-    function syncFormFromChat(message){
-      const codes = extractICAOCodes(message);
-      if(codes.length >= 2){
-        depEl.value = codes[0];
-        destEl.value = codes[1];
-      }
-
-      const tt = inferTripType(message);
-      if(tt){
-        tripTypeEl.value = tt;
-      }
-
-      // Depart date from text
-      const depDate = parseNaturalDateFromText(message);
-      if(depDate){
-        departInput.value = toISODate(depDate);
-      }
-
-      // Return date: if message contains a second explicit date, try to find it
-      // quick approach: if there are 2 ISO dates, use the second as return
-      const isoDates = (message || "").match(/\b\d{4}-\d{2}-\d{2}\b/g);
-      if(isoDates && isoDates.length >= 2){
-        const rd = new Date(isoDates[1] + "T00:00:00");
-        if(!isNaN(rd)) returnInput.value = toISODate(startOfDay(rd));
-      } else {
-        // If roundtrip selected and no return date, infer next-day if phrasing suggests it
-        if(tripTypeEl.value === "roundtrip"){
-          const d = departInput.value ? startOfDay(new Date(departInput.value + "T00:00:00")) : null;
-          const inferred = inferReturnDate(message, d);
-          if(inferred) returnInput.value = toISODate(inferred);
-        }
-      }
-
-      updateDateHelpers();
-    }
-
-    async function sendMessage(message){
-      setBusy(true);
-      showTyping();
-
-      try{
-        const res = await fetch("/api/chat", {
-          method:"POST",
-          headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ message })
-        });
-
-        const data = await res.json().catch(() => null);
-        hideTyping();
-
-        if(!res.ok){
-          const errText = data?.error || `Request failed (${res.status})`;
-          status.textContent = errText;
-          addBubble("Something went wrong. " + errText, "ai");
-          return;
-        }
-
-        if(data?.reply){
-          addBubble(data.reply, "ai");
-        } else if(data?.error){
-          status.textContent = data.error;
-          addBubble("Something went wrong. " + data.error, "ai");
-        } else {
-          addBubble("Hmm—got an unexpected response from the server.", "ai");
-        }
-      } catch(e){
-        hideTyping();
-        status.textContent = String(e);
-        addBubble("Couldn’t reach the server. " + String(e), "ai");
-      } finally {
-        setBusy(false);
-        input.focus();
-      }
-    }
-
-    // Enter to send, Shift+Enter newline
-    input.addEventListener("keydown", (e) => {
-      if(e.key === "Enter" && !e.shiftKey){
-        e.preventDefault();
-        form.requestSubmit();
-      }
-    });
-
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const msg = (input.value || "").trim();
-      if(!msg) return;
-
-      clearPlaceholderIfNeeded();
-      addBubble(msg, "me");
-
-      // Sync chat -> form immediately (even before server reply)
-      syncFormFromChat(msg);
-
-      input.value = "";
-      await sendMessage(msg);
-    });
-
-    // Example chips
-    document.querySelectorAll(".chip").forEach(chip => {
-      chip.addEventListener("click", () => {
-        const msg = chip.getAttribute("data-msg") || "";
-        input.value = msg;
-        input.focus();
-        // Also sync the form on chip click (nice touch)
-        syncFormFromChat(msg);
-      });
-    });
-
     // Extra: If user selects roundtrip and return is blank, set return to next day (gentle convenience)
     tripTypeEl.addEventListener("change", () => {
       if(tripTypeEl.value === "roundtrip" && !returnInput.value && departInput.value){
@@ -780,5 +933,4 @@
       updateDateHelpers();
     });
   </script>
-</body>
-</html>
+{% endblock %}

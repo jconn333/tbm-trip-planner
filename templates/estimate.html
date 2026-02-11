@@ -1,89 +1,18 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>{{ app_name }} — Estimate</title>
-
-  <!-- Leaflet (route map) -->
+{% extends "base.html" %}
+{% block title %}{{ app_name }} — Estimate{% endblock %}
+{% block header_subtitle %}Estimate for {{ dep_icao }} → {{ dest_icao }} ({{ depart_date }}{% if trip_type == "roundtrip" and return_date %} returning {{ return_date }}{% endif %}) · <a class="back" href="/">Back</a>{% endblock %}
+{% block header_badge %}<div class="badge" title="Estimate view"><span class="dot" aria-hidden="true"></span>Estimate</div>{% endblock %}
+{% block head_extra %}
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-
-  <style>
-    :root{
-      --bg: #0b1220;
-      --panel: rgba(255,255,255,0.06);
-      --panel2: rgba(255,255,255,0.08);
-      --stroke: rgba(255,255,255,0.12);
-      --text: rgba(255,255,255,0.92);
-      --muted: rgba(255,255,255,0.65);
-      --muted2: rgba(255,255,255,0.52);
-      --shadow: 0 16px 44px rgba(0,0,0,0.42);
-      --accent: #6ea8fe;
-      --accent2: #7cf2c2;
-      --danger: #ff5c70;
-      --ok: #7cf2c2;
-      --warn: #ffd166;
-      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --radius: 18px;
-    }
-
-    * { box-sizing: border-box; }
-    html, body { height: 100%; }
-
-    body{
-      margin:0;
-      font-family: var(--sans);
-      color: var(--text);
-      background:
-        radial-gradient(1200px 540px at 16% 12%, rgba(110,168,254,0.18), transparent 60%),
-        radial-gradient(900px 520px at 82% 26%, rgba(124,242,194,0.14), transparent 60%),
-        radial-gradient(900px 680px at 50% 100%, rgba(255,255,255,0.05), transparent 70%),
-        var(--bg);
-    }
-
-    .wrap{
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 26px 16px 66px;
-    }
-
-    .topbar{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-    .brand{ display:flex; align-items:center; gap: 12px; }
-    .logo{
-      width: 38px; height: 38px; border-radius: 14px;
-      background: linear-gradient(135deg, rgba(110,168,254,0.95), rgba(124,242,194,0.88));
-      box-shadow: 0 10px 24px rgba(110,168,254,0.18);
-      flex: 0 0 auto;
-    }
-    .brand h1{ margin:0; font-size: 17px; letter-spacing: 0.2px; line-height: 1.2; }
-    .brand .sub{ margin-top: 3px; font-size: 12.5px; color: var(--muted); }
-    .badge{
-      display:inline-flex; align-items:center; gap: 8px;
-      padding: 8px 11px; border-radius: 999px;
-      border: 1px solid var(--stroke);
-      background: rgba(255,255,255,0.05);
-      color: var(--muted); font-size: 12.5px; white-space: nowrap;
-      height: fit-content;
-    }
-    .dot{ width: 8px; height: 8px; border-radius: 99px; background: var(--ok); display:inline-block; }
-
+{% endblock %}
+{% block page_styles %}
     .grid{
       display:grid;
-      grid-template-columns: 1.08fr 0.92fr;
+      grid-template-columns: 1fr;
       gap: 14px;
-    }
-    @media (max-width: 980px){
-      .grid{ grid-template-columns: 1fr; }
     }
 
     .card{
@@ -102,9 +31,42 @@
       justify-content:space-between;
       gap: 12px;
     }
-    .cardHeader h2{ margin: 0; font-size: 14px; letter-spacing: 0.2px; }
-    .cardHeader p{ margin: 6px 0 0; color: var(--muted); font-size: 12.8px; line-height: 1.35; }
-    .cardBody{ padding: 16px; }
+    .headerTools{
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .tbmLogo{
+      display:inline-flex;
+      align-items:center;
+      gap: 8px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.05);
+      border-radius: 999px;
+      padding: 6px 10px 6px 6px;
+      color: rgba(245,251,255,0.92);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+    }
+    .tbmLogoIcon{
+      width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background: linear-gradient(135deg, rgba(110,168,254,0.92), rgba(124,242,194,0.82));
+      color: #0b1220;
+      font-size: 10px;
+      font-weight: 900;
+    }
+    .cardHeader h2{ margin: 0; font-size: 15px; font-family: var(--display); letter-spacing: 0.15px; }
+    .cardHeader p{ margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.35; }
+    .cardBody{ padding: 17px; }
 
     .row2{
       display:grid;
@@ -150,7 +112,7 @@
     }
 
     .bigSummary{
-      padding: 12px 12px;
+      padding: 13px 14px;
       border-radius: 16px;
       border: 1px solid rgba(255,255,255,0.12);
       background: rgba(255,255,255,0.045);
@@ -158,6 +120,54 @@
       font-size: 14px;
     }
     .bigSummary .muted{ color: var(--muted); font-size: 12.8px; margin-top: 6px; }
+    .fuelControl{
+      margin-top: 12px;
+      border-radius: 16px;
+      border: 1px solid rgba(110,168,254,0.34);
+      background:
+        radial-gradient(130% 140% at 0% 0%, rgba(110,168,254,0.18), rgba(110,168,254,0) 55%),
+        rgba(255,255,255,0.04);
+      padding: 12px;
+    }
+    .fuelTop{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .fuelTitle{
+      font-size: 13px;
+      font-weight: 750;
+      letter-spacing: 0.1px;
+    }
+    .fuelValue{
+      font-size: 22px;
+      font-weight: 820;
+      color: rgba(246,252,255,0.96);
+      letter-spacing: 0.2px;
+    }
+    .fuelDelta{
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .fuelDelta.up{ color: rgba(255,208,150,0.95); }
+    .fuelDelta.down{ color: rgba(124,242,194,0.95); }
+    .fuelRange{
+      width: 100%;
+      margin-top: 10px;
+      accent-color: var(--accent2);
+      cursor: pointer;
+    }
+    .fuelTicks{
+      margin-top: 6px;
+      display:flex;
+      justify-content:space-between;
+      color: var(--muted2);
+      font-size: 11px;
+      font-family: var(--mono);
+    }
 
     .kpis{
       display:grid;
@@ -172,10 +182,10 @@
       border-radius: 16px;
       border: 1px solid rgba(255,255,255,0.10);
       background: rgba(255,255,255,0.04);
-      padding: 10px 12px;
+      padding: 11px 12px;
     }
     .kpi .label{ color: var(--muted); font-size: 12px; }
-    .kpi .value{ font-size: 18px; font-weight: 750; margin-top: 4px; letter-spacing: 0.2px; }
+    .kpi .value{ font-size: 19px; font-weight: 800; margin-top: 4px; letter-spacing: 0.15px; }
     .kpi .sub{ color: var(--muted2); font-size: 12px; margin-top: 4px; }
 
     /* Map */
@@ -313,152 +323,14 @@
     }
     .tag strong{ color: var(--text); font-weight: 750; }
 
-    /* Follow-up chat */
-    .chatThread{
-      height: 260px;
-      overflow:auto;
-      padding: 12px;
-      background: rgba(255,255,255,0.035);
-      border: 1px solid rgba(255,255,255,0.10);
-      border-radius: 16px;
-    }
-    .bubbleRow{
-      display:flex;
-      margin: 9px 0;
-      gap: 10px;
-    }
-    .bubbleRow.me{ justify-content: flex-end; }
-    .bubble{
-      max-width: 86%;
-      border-radius: 16px;
-      padding: 10px 12px;
-      border: 1px solid rgba(255,255,255,0.10);
-      white-space: pre-wrap;
-      line-height: 1.35;
-      font-size: 14px;
-    }
-    .bubble.me{ background: rgba(255,255,255,0.085); }
-    .bubble.ai{
-      background: rgba(110,168,254,0.09);
-      border-color: rgba(110,168,254,0.20);
-    }
-
-    .chatForm{
-      display:flex;
-      gap: 10px;
-      margin-top: 10px;
-      align-items: flex-end;
-    }
-    textarea{
-      width: 100%;
-      padding: 11px 12px;
-      border-radius: 14px;
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(255,255,255,0.06);
-      color: var(--text);
-      outline: none;
-      font-size: 14px;
-      min-height: 44px;
-      max-height: 120px;
-      resize: none;
-    }
-    textarea:focus{
-      border-color: rgba(110,168,254,0.55);
-      box-shadow: 0 0 0 4px rgba(110,168,254,0.12);
-    }
-
-    .btn{
-      appearance:none;
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(255,255,255,0.08);
-      color: var(--text);
-      padding: 10px 13px;
-      border-radius: 14px;
-      cursor: pointer;
-      font-weight: 650;
-      font-size: 13.5px;
-      letter-spacing: 0.15px;
-      white-space: nowrap;
-    }
-    .btn:hover{ background: rgba(255,255,255,0.11); }
-    .btn:disabled{ opacity: 0.55; cursor: not-allowed; }
-
-    .btnPrimary{
-      border: 1px solid rgba(110,168,254,0.62);
-      background: linear-gradient(135deg, rgba(110,168,254,0.92), rgba(124,242,194,0.50));
-      color: #0b1220;
-      box-shadow: 0 10px 20px rgba(110,168,254,0.14);
-    }
-
-    .chips{ display:flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-    .chip{
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(255,255,255,0.05);
-      color: var(--muted);
-      padding: 7px 10px;
-      border-radius: 999px;
-      font-size: 12.5px;
-      cursor: pointer;
-      user-select: none;
-    }
-    .chip:hover{ background: rgba(255,255,255,0.08); color: var(--text); }
-
-    .status{
-      margin-top: 8px;
-      font-size: 12.5px;
-      color: var(--muted);
-      min-height: 18px;
-    }
-
-    .typing{
-      display:inline-flex;
-      align-items:center;
-      gap: 6px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .dots{ display:inline-flex; gap: 3px; align-items:center; }
-    .dotB{
-      width: 6px; height: 6px; border-radius: 99px;
-      background: rgba(255,255,255,0.55);
-      animation: bounce 1.2s infinite ease-in-out;
-    }
-    .dotB:nth-child(2){ animation-delay: 0.15s; }
-    .dotB:nth-child(3){ animation-delay: 0.30s; }
-    @keyframes bounce{
-      0%, 80%, 100%{ transform: translateY(0); opacity: 0.55; }
-      40%{ transform: translateY(-4px); opacity: 0.95; }
-    }
-
     a.back{
       color: rgba(255,255,255,0.88);
       text-decoration: none;
       border-bottom: 1px solid rgba(255,255,255,0.22);
     }
     a.back:hover{ border-bottom-color: rgba(255,255,255,0.5); }
-  </style>
-</head>
-
-<body>
-  <div class="wrap">
-    <div class="topbar">
-      <div class="brand">
-        <div class="logo" aria-hidden="true"></div>
-        <div>
-          <h1>{{ app_name }}</h1>
-          <div class="sub">
-            Estimate for {{ dep_icao }} → {{ dest_icao }} ({{ depart_date }}{% if trip_type == "roundtrip" and return_date %} returning {{ return_date }}{% endif %})
-            · <a class="back" href="/">Back</a>
-          </div>
-        </div>
-      </div>
-
-      <div class="badge" title="Estimate view">
-        <span class="dot" aria-hidden="true"></span>
-        Estimate
-      </div>
-    </div>
-
+{% endblock %}
+{% block content %}
     <div class="grid">
       <!-- LEFT: Summary + Map + Charts -->
       <div class="card">
@@ -468,20 +340,19 @@
             <p>Switch between Typical and Conservative and everything updates.</p>
           </div>
 
-          <div class="toggle" role="tablist" aria-label="Assumptions toggle">
-            <button id="btnTypical" class="active" type="button">Typical</button>
-            <button id="btnConservative" type="button">Conservative</button>
+          <div class="headerTools">
+            <div class="tbmLogo" aria-label="TBM logo">
+              <span class="tbmLogoIcon">TBM</span>
+              <span>TBM</span>
+            </div>
+            <div class="toggle" role="tablist" aria-label="Assumptions toggle">
+              <button id="btnTypical" class="active" type="button">Typical</button>
+              <button id="btnConservative" type="button">Conservative</button>
+            </div>
           </div>
         </div>
 
         <div class="cardBody">
-          <div id="summary" class="bigSummary">
-            {{ summary_seed }}
-            <div class="muted">
-              Tip: Conservative mostly means a bit slower (routing + overhead), so it burns more fuel and time.
-            </div>
-          </div>
-
           <div class="kpis" aria-label="Key metrics">
             <div class="kpi">
               <div class="label">Total block time</div>
@@ -499,6 +370,26 @@
               <div class="label">Fuel estimate</div>
               <div class="value" id="kpiFuel">—</div>
               <div class="sub" id="kpiFuelSub">{{ fuel_burn_gph }} gph · ${{ fuel_price }}/gal</div>
+            </div>
+          </div>
+          <div id="summary" class="bigSummary" style="margin-top: 12px;">
+            {{ summary_seed }}
+            <div class="muted">
+              Tip: Conservative mostly means a bit slower (routing + overhead), so it burns more fuel and time.
+            </div>
+          </div>
+          <div class="fuelControl" aria-label="Fuel price control">
+            <div class="fuelTop">
+              <div>
+                <div class="fuelTitle">Fuel Price</div>
+                <div class="fuelDelta" id="fuelPriceDelta"></div>
+              </div>
+              <div class="fuelValue" id="fuelPriceValue">${{ fuel_price }}</div>
+            </div>
+            <input id="fuelPriceSlider" class="fuelRange" type="range" min="0.5" max="25" step="0.1" value="{{ fuel_price }}" />
+            <div class="fuelTicks">
+              <span>$0.50</span>
+              <span>$25.00</span>
             </div>
           </div>
 
@@ -582,43 +473,9 @@
         </div>
       </div>
 
-      <!-- RIGHT: Natural follow-ups -->
-      <div class="card">
-        <div class="cardHeader">
-          <div>
-            <h2>Ask a follow-up</h2>
-            <p>Ask normal questions about this estimate. It’ll answer in plain English.</p>
-          </div>
-        </div>
-
-        <div class="cardBody">
-          <div id="chatThread" class="chatThread" aria-live="polite">
-            <div class="typing" style="opacity:.9;">
-              Try: “If I leave at noon, what changes?” or “What’s driving the cost the most?”
-            </div>
-          </div>
-
-          <div class="chips" aria-label="Example follow-ups">
-            <div class="chip" data-msg="What’s driving the cost the most on this estimate?">What’s driving the cost?</div>
-            <div class="chip" data-msg="How much of the total is fuel, roughly?">How much is fuel?</div>
-            <div class="chip" data-msg="What changes between typical and conservative, in plain terms?">Typical vs conservative?</div>
-            <div class="chip" data-msg="If I add a quick stop for fuel, how should I think about the cost impact?">Add a stop?</div>
-          </div>
-
-          <form id="chatForm" class="chatForm">
-            <textarea id="chatInput" placeholder="Ask about this estimate…" spellcheck="false"></textarea>
-            <button id="chatSend" class="btn btnPrimary" type="submit">Send</button>
-          </form>
-
-          <div id="chatStatus" class="status"></div>
-          <div class="micro">
-            Enter to send · Shift+Enter for a new line
-          </div>
-        </div>
-      </div>
     </div>
-  </div>
-
+{% endblock %}
+{% block scripts %}
   <script>
     // Estimate payload from server (full JSON)
     const EST = {{ estimation_json|safe }};
@@ -628,6 +485,11 @@
 
     const btnTypical = document.getElementById("btnTypical");
     const btnConservative = document.getElementById("btnConservative");
+    const fuelPriceSlider = document.getElementById("fuelPriceSlider");
+    const fuelPriceValue = document.getElementById("fuelPriceValue");
+    const fuelPriceDelta = document.getElementById("fuelPriceDelta");
+    const baseFuelPrice = Number(EST?.assumptions?.fuel_price_per_gal || 0) || Number(fuelPriceSlider?.value || 0) || 0;
+    let activeFuelPrice = baseFuelPrice;
 
     function setMode(mode){
       MODE = mode;
@@ -648,6 +510,45 @@
       const hh = Math.floor(totalMin / 60);
       const mm = totalMin % 60;
       return `${hh}:${String(mm).padStart(2,"0")}`;
+    }
+    function adjustedFuelCost(costs){
+      const gallons = Number(costs?.fuel_gal || 0);
+      const baseFuel = Number(costs?.fuel || 0);
+      if (gallons > 0 && Number.isFinite(activeFuelPrice)) return gallons * activeFuelPrice;
+      if (baseFuelPrice > 0) return baseFuel * (activeFuelPrice / baseFuelPrice);
+      return baseFuel;
+    }
+
+    function adjustedCosts(mode){
+      const costs = EST?.totals?.[mode]?.costs || {};
+      const fuel = adjustedFuelCost(costs);
+      const baseFuel = Number(costs.fuel || 0);
+      const total = Math.max(0, Number(costs.total || 0) - baseFuel + fuel);
+      return {
+        mgmt: Number(costs.mgmt || 0),
+        maint: Number(costs.maint || 0),
+        engine: Number(costs.engine || 0),
+        fuel,
+        fuel_gal: Number(costs.fuel_gal || 0),
+        total,
+      };
+    }
+
+    function renderFuelControl(){
+      if (!fuelPriceSlider || !fuelPriceValue || !fuelPriceDelta) return;
+      const diff = activeFuelPrice - baseFuelPrice;
+      const absDiff = Math.abs(diff);
+      fuelPriceValue.textContent = `$${activeFuelPrice.toFixed(2)}/gal`;
+      fuelPriceDelta.classList.remove("up", "down");
+      if (absDiff < 0.001) {
+        fuelPriceDelta.textContent = "Baseline fuel price from your estimate";
+      } else if (diff > 0) {
+        fuelPriceDelta.classList.add("up");
+        fuelPriceDelta.textContent = `+$${absDiff.toFixed(2)}/gal vs baseline`;
+      } else {
+        fuelPriceDelta.classList.add("down");
+        fuelPriceDelta.textContent = `-$${absDiff.toFixed(2)}/gal vs baseline`;
+      }
     }
 
     // ---------------- Map (Leaflet) ----------------
@@ -810,7 +711,7 @@
     };
 
     function renderCostBreakdown(){
-      const totals = EST.totals[MODE].costs;
+      const totals = adjustedCosts(MODE);
 
       const parts = [
         { key:"mgmt", label:"Management", value:Number(totals.mgmt||0), color: COLORS.mgmt },
@@ -865,7 +766,7 @@
       center2.setAttribute("fill","rgba(255,255,255,0.75)");
       center2.setAttribute("font-size","12");
       center2.setAttribute("font-weight","650");
-      center2.textContent = fmtMoney(Number(EST.totals[MODE].costs.total||0));
+      center2.textContent = fmtMoney(Number(totals.total || 0));
       donut.appendChild(center2);
 
       let spotlight = null;
@@ -906,22 +807,27 @@
     // ---------------- KPI + Legs + Summary ----------------
     function renderKPIs(){
       const t = EST.totals[MODE];
-      const totalCost = Number(t.costs.total||0);
-      const fuelGal = Number(t.costs.fuel_gal||0);
+      const costsAdj = adjustedCosts(MODE);
+      const totalCost = Number(costsAdj.total || 0);
+      const fuelGal = Number(costsAdj.fuel_gal || 0);
+      const fuelBurn = Number(EST?.assumptions?.fuel_burn_gph || 0);
 
       document.getElementById("kpiTime").textContent = t.block_time;
       document.getElementById("kpiCost").textContent = fmtMoney(totalCost);
       document.getElementById("kpiFuel").textContent = `${Math.round(fuelGal)} gal`;
+      document.getElementById("kpiFuelSub").textContent = `${fuelBurn || "—"} gph · $${activeFuelPrice.toFixed(2)}/gal`;
 
       // Legs text
       EST.legs.forEach((leg, idx) => {
         const which = leg[MODE];
         const c = which.costs;
         const fuel = Math.round(Number(c.fuel_gal||0));
+        const legFuel = adjustedFuelCost(c);
+        const legTotal = Math.max(0, Number(c.total || 0) - Number(c.fuel || 0) + legFuel);
         const wind = Math.round(Number(leg.winds.component_kt||0));
         const windTxt = wind > 5 ? `${wind} kt tailwind` : (wind < -5 ? `${Math.abs(wind)} kt headwind` : `light winds`);
 
-        const line = `${which.block_time} block, about ${fmtMoney(Number(c.total||0))}. Groundspeed around ${which.gs_kt} kt with ${windTxt}. Fuel about ${fuel} gal.`;
+        const line = `${which.block_time} block, about ${fmtMoney(legTotal)}. Groundspeed around ${which.gs_kt} kt with ${windTxt}. Fuel about ${fuel} gal.`;
         const el = document.getElementById(`legMeta${idx}`);
         if (el) el.textContent = line;
       });
@@ -944,11 +850,12 @@
       if (returnDate && EST.inputs.trip_type === "roundtrip") dateLine += ` and returning ${returnDate}`;
 
       const time = EST.totals[MODE].block_time;
-      const cost = fmtMoney(Number(EST.totals[MODE].costs.total||0));
+      const cost = fmtMoney(Number(adjustedCosts(MODE).total || 0));
 
       const compareMode = MODE === "typical" ? "Conservative" : "Typical";
-      const other = EST.totals[MODE === "typical" ? "conservative" : "typical"];
-      const otherCost = fmtMoney(Number(other.costs.total||0));
+      const otherMode = MODE === "typical" ? "conservative" : "typical";
+      const other = EST.totals[otherMode];
+      const otherCost = fmtMoney(Number(adjustedCosts(otherMode).total || 0));
       const otherTime = other.block_time;
 
       const summary =
@@ -960,152 +867,9 @@
       document.getElementById("summary").firstChild.textContent = summary;
     }
 
-    // ---------------- Follow-up chat (context-aware) ----------------
-    const thread = document.getElementById("chatThread");
-    const form = document.getElementById("chatForm");
-    const input = document.getElementById("chatInput");
-    const sendBtn = document.getElementById("chatSend");
-    const status = document.getElementById("chatStatus");
-
-    function scrollToBottom(){ thread.scrollTop = thread.scrollHeight; }
-    function clearPlaceholderIfNeeded(){
-      if (thread.children.length === 1 && thread.textContent.includes("Try:")) thread.innerHTML = "";
-    }
-    function addBubble(text, who){
-      const row = document.createElement("div");
-      row.className = "bubbleRow " + (who === "me" ? "me" : "ai");
-
-      const bubble = document.createElement("div");
-      bubble.className = "bubble " + (who === "me" ? "me" : "ai");
-      bubble.textContent = text;
-
-      row.appendChild(bubble);
-      thread.appendChild(row);
-      scrollToBottom();
-    }
-
-    function showTyping(){
-      const row = document.createElement("div");
-      row.className = "bubbleRow ai";
-      row.id = "typingRow";
-
-      const bubble = document.createElement("div");
-      bubble.className = "bubble ai";
-      bubble.style.display = "inline-flex";
-      bubble.style.alignItems = "center";
-      bubble.style.gap = "8px";
-
-      const label = document.createElement("span");
-      label.className = "typing";
-      label.textContent = "Thinking";
-
-      const dots = document.createElement("span");
-      dots.className = "dots";
-      dots.innerHTML = '<span class="dotB"></span><span class="dotB"></span><span class="dotB"></span>';
-
-      bubble.appendChild(label);
-      bubble.appendChild(dots);
-      row.appendChild(bubble);
-      thread.appendChild(row);
-      scrollToBottom();
-    }
-    function hideTyping(){
-      const el = document.getElementById("typingRow");
-      if (el) el.remove();
-    }
-    function setBusy(b){
-      sendBtn.disabled = b;
-      input.disabled = b;
-      if (b) status.textContent = "";
-    }
-
-    function buildContextPrefix(){
-      const dep = EST.inputs.dep;
-      const dest = EST.inputs.dest;
-      const depart = EST.inputs.depart_date;
-      const ret = EST.inputs.return_date;
-      const tripType = EST.inputs.trip_type === "roundtrip" ? "round trip" : "one-way";
-
-      const time = EST.totals[MODE].block_time;
-      const cost = fmtMoney(Number(EST.totals[MODE].costs.total||0));
-      const wind = Math.round(Number(EST.winds_outbound.component_kt||0));
-      const windTxt = wind > 5 ? `${wind} kt tailwind` : (wind < -5 ? `${Math.abs(wind)} kt headwind` : "light winds");
-
-      let dateLine = depart;
-      if (ret && EST.inputs.trip_type === "roundtrip") dateLine = `${depart} returning ${ret}`;
-
-      return `Context: I’m looking at an estimate for a ${tripType} from ${dep} to ${dest} (${dateLine}). Using ${MODE} assumptions it’s about ${time} and ${cost}, with ${windTxt} on the outbound leg. Now my question: `;
-    }
-
-    async function sendFollowup(message){
-      setBusy(true);
-      showTyping();
-
-      try{
-        const full = buildContextPrefix() + message;
-
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: full })
-        });
-
-        const data = await res.json().catch(() => null);
-        hideTyping();
-
-        if (!res.ok){
-          const errText = data?.error || `Request failed (${res.status})`;
-          status.textContent = errText;
-          addBubble("Something went wrong. " + errText, "ai");
-          return;
-        }
-
-        if (data?.reply){
-          addBubble(data.reply, "ai");
-        } else if (data?.error){
-          status.textContent = data.error;
-          addBubble("Something went wrong. " + data.error, "ai");
-        } else {
-          addBubble("Hmm — I got an unexpected response from the server.", "ai");
-        }
-      } catch(e){
-        hideTyping();
-        status.textContent = String(e);
-        addBubble("Couldn’t reach the server. " + String(e), "ai");
-      } finally {
-        setBusy(false);
-        input.focus();
-      }
-    }
-
-    // Enter to send, Shift+Enter newline
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey){
-        e.preventDefault();
-        form.requestSubmit();
-      }
-    });
-
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const msg = (input.value || "").trim();
-      if (!msg) return;
-
-      clearPlaceholderIfNeeded();
-      addBubble(msg, "me");
-      input.value = "";
-      await sendFollowup(msg);
-    });
-
-    document.querySelectorAll(".chip").forEach(chip => {
-      chip.addEventListener("click", () => {
-        input.value = chip.getAttribute("data-msg") || "";
-        input.focus();
-      });
-    });
-
     // ---------------- Render pipeline ----------------
     function renderAll(){
+      renderFuelControl();
       renderKPIs();
       renderWinds();
       renderCostBreakdown();
@@ -1113,7 +877,15 @@
     }
 
     // Initialize
+    if (fuelPriceSlider) {
+      fuelPriceSlider.addEventListener("input", () => {
+        const parsed = Number(fuelPriceSlider.value);
+        if (Number.isFinite(parsed)) {
+          activeFuelPrice = parsed;
+          renderAll();
+        }
+      });
+    }
     renderAll();
   </script>
-</body>
-</html>
+{% endblock %}
