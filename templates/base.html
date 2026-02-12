@@ -6,152 +6,25 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="csrf-token" content="{{ csrf_token }}" />
   <title>{% block title %}{{ page_app_name }}{% endblock %}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <style>
-    :root{
-      --bg:#0b1220;
-      --panel:rgba(255,255,255,0.06);
-      --panel2:rgba(255,255,255,0.08);
-      --stroke:rgba(255,255,255,0.12);
-      --text:rgba(255,255,255,0.92);
-      --muted:rgba(255,255,255,0.65);
-      --muted2:rgba(255,255,255,0.52);
-      --shadow:0 16px 44px rgba(0,0,0,0.42);
-      --accent:#6ea8fe;
-      --accent2:#7cf2c2;
-      --danger:#ff5c70;
-      --ok:#7cf2c2;
-      --border:rgba(255,255,255,0.12);
-      --sans:"Manrope","Avenir Next","Segoe UI",sans-serif;
-      --display:"Space Grotesk","Manrope","Avenir Next","Segoe UI",sans-serif;
-      --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
-      --radius:18px;
-    }
-
     *{ box-sizing:border-box; }
-    html,body{ height:100%; }
-    body{
-      margin:0;
-      font-family:var(--sans);
-      color:var(--text);
-      letter-spacing: 0.01em;
-      background:
-        radial-gradient(1200px 540px at 16% 12%, rgba(110,168,254,0.18), transparent 60%),
-        radial-gradient(900px 520px at 82% 26%, rgba(124,242,194,0.14), transparent 60%),
-        radial-gradient(900px 680px at 50% 100%, rgba(255,255,255,0.05), transparent 70%),
-        var(--bg);
-    }
-
-    .page{
-      max-width:1180px;
-      margin:0 auto;
-      padding:26px 18px 66px;
-      animation: pageIn 280ms ease-out;
-    }
-    @keyframes pageIn{
-      from{ opacity:0; transform: translateY(4px); }
-      to{ opacity:1; transform: translateY(0); }
-    }
-
+    html,body{ height:100%; margin:0; }
     .topbar{
       display:flex;
-      align-items:flex-start;
       justify-content:space-between;
       gap:12px;
-      margin-bottom:16px;
       flex-wrap:wrap;
     }
-
-    .brand{ display:flex; align-items:center; gap:12px; min-width: 0; }
-    .logo{
-      width:38px;
-      height:38px;
-      border-radius:14px;
-      background:linear-gradient(135deg, rgba(110,168,254,0.95), rgba(124,242,194,0.88));
-      box-shadow:0 10px 24px rgba(110,168,254,0.18);
-      flex:0 0 auto;
-    }
-    .brandText{ min-width: 0; }
-    .brandText h1{
-      margin:0;
-      font-family:var(--display);
-      font-size:19px;
-      font-weight:700;
-      letter-spacing:0.1px;
-      line-height:1.2;
-    }
-    .brandText .sub{
-      margin-top:3px;
-      font-size:12.5px;
-      color:var(--muted);
-      line-height:1.35;
-      overflow-wrap:anywhere;
-    }
-
+    .brand{ display:flex; align-items:center; gap:12px; min-width:0; }
+    .logo{ width:36px; height:36px; flex:0 0 auto; }
+    .brandText h1{ margin:0; line-height:1.2; }
+    .brandText .sub{ margin-top:2px; line-height:1.4; overflow-wrap:anywhere; }
     .headerRight{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .siteNav{ display:flex; align-items:center; gap:8px; }
-    .siteNav a{
-      text-decoration:none;
-      color:var(--muted);
-      font-size:12.5px;
-      border:1px solid rgba(255,255,255,0.12);
-      background:rgba(255,255,255,0.04);
-      border-radius:999px;
-      padding:7px 10px;
-      transition: border-color .16s ease, background .16s ease, color .16s ease;
-    }
-    .siteNav a:hover{ color:var(--text); background:rgba(255,255,255,0.08); }
-    .siteNav a.active{
-      color:#f4fbff;
-      border-color: rgba(124,242,194,0.52);
-      background: linear-gradient(135deg, rgba(110,168,254,0.22), rgba(124,242,194,0.18));
-    }
-    .authBox{
-      display:flex;
-      align-items:center;
-      gap:8px;
-    }
-    .authUser{
-      font-size:12.5px;
-      color:var(--muted);
-    }
-    .authBtn{
-      border:1px solid rgba(255,255,255,0.18);
-      border-radius:999px;
-      background:rgba(255,255,255,0.05);
-      color:var(--text);
-      font-size:12px;
-      font-weight:600;
-      padding:7px 11px;
-      cursor:pointer;
-    }
-    .authBtn:hover{ background:rgba(255,255,255,0.1); }
-
-    .badge{
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      padding:8px 11px;
-      border-radius:999px;
-      border:1px solid var(--stroke);
-      background:rgba(255,255,255,0.05);
-      color:var(--muted);
-      font-size:12.5px;
-      white-space:nowrap;
-      height:fit-content;
-    }
-    .dot{ width:8px; height:8px; border-radius:99px; background:var(--ok); display:inline-block; }
-
-    .footer{
-      margin-top:18px;
-      border-top:1px solid rgba(255,255,255,0.08);
-      padding-top:10px;
-      color:var(--muted2);
-      font-size:12px;
-      line-height:1.35;
-    }
+    .siteNav{ display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+    .authBox{ display:flex; align-items:center; gap:8px; }
     .toastStack{
       position:fixed;
       right:16px;
@@ -162,18 +35,10 @@
       z-index:80;
     }
     .toast{
-      border:1px solid rgba(255,255,255,0.18);
-      background:rgba(15,23,37,0.95);
-      color:var(--text);
       border-radius:12px;
       padding:10px 12px;
       min-width:220px;
-      box-shadow:var(--shadow);
       font-size:12px;
-    }
-    .toast.error{
-      border-color:rgba(255,92,112,0.6);
-      background:rgba(75,20,28,0.95);
     }
     .tbmNativeSelect{
       position:absolute !important;
@@ -186,30 +51,19 @@
     .tbmCustomSelect{
       position:relative;
       width:100%;
-      z-index: 50;
+      z-index:50;
     }
     .tbmCustomSelectBtn{
       width:100%;
       text-align:left;
-      padding:10px 11px;
-      border-radius:10px;
-      border:1px solid rgba(255,255,255,.18);
-      background:rgba(8,14,28,.5);
-      color:var(--text);
       cursor:pointer;
       display:flex;
       align-items:center;
       justify-content:space-between;
       gap:8px;
-      font-size:13px;
       min-height:40px;
     }
-    .tbmCustomSelectBtn::after{
-      content:"▾";
-      color:var(--muted);
-      font-size:12px;
-      flex:0 0 auto;
-    }
+    .tbmCustomSelectBtn::after{ content:"▾"; font-size:12px; flex:0 0 auto; }
     .tbmCustomSelectMenu{
       position:absolute;
       top:calc(100% + 6px);
@@ -217,10 +71,6 @@
       right:0;
       max-height:240px;
       overflow:auto;
-      border-radius:10px;
-      border:1px solid rgba(255,255,255,.16);
-      background:rgba(8,14,28,.98);
-      box-shadow:0 18px 32px rgba(0,0,0,.48);
       display:none;
       z-index:120;
     }
@@ -228,30 +78,16 @@
     .tbmCustomSelectOption{
       width:100%;
       border:0;
-      border-top:1px solid rgba(255,255,255,.06);
-      background:transparent;
-      color:var(--text);
       text-align:left;
       padding:8px 11px;
       cursor:pointer;
       font-size:13px;
     }
     .tbmCustomSelectOption:first-child{ border-top:0; }
-    .tbmCustomSelectOption:hover{ background:rgba(110,168,254,.14); }
-    .tbmCustomSelectOption.active{
-      background:rgba(124,242,194,.18);
-      color:#ebfffa;
-    }
-
-    @media (max-width: 720px){
-      .page{ padding:20px 12px 54px; }
-      .topbar{ margin-bottom:12px; }
-      .headerRight{ width:100%; justify-content:space-between; }
-      .siteNav a{ font-size:12px; }
-    }
 
     {% block page_styles %}{% endblock %}
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}" />
   {% block head_extra %}{% endblock %}
 </head>
 <body>
@@ -268,14 +104,26 @@
       <div class="headerRight">
         <nav class="siteNav" aria-label="Primary navigation">
           <a href="/" class="{% if _path == '/' or _path.startswith('/estimate') %}active{% endif %}" aria-current="{% if _path == '/' or _path.startswith('/estimate') %}page{% endif %}">Planner</a>
-          <a href="/calendar" class="{% if _path.startswith('/calendar') %}active{% endif %}" aria-current="{% if _path.startswith('/calendar') %}page{% endif %}">Calendar</a>
-          {% if current_user %}
-            <a href="/my-flights" class="{% if _path.startswith('/my-flights') %}active{% endif %}" aria-current="{% if _path.startswith('/my-flights') %}page{% endif %}">My Flights</a>
-          {% endif %}
+
+          <details class="navDropdown {% if _path.startswith('/calendar') or _path.startswith('/my-flights') %}active{% endif %}">
+            <summary class="navDropdownSummary">Operations</summary>
+            <div class="navDropdownMenu" role="menu" aria-label="Operations">
+              <a href="/calendar" class="{% if _path.startswith('/calendar') %}active{% endif %}" aria-current="{% if _path.startswith('/calendar') %}page{% endif %}" role="menuitem">Calendar</a>
+              {% if current_user %}
+                <a href="/my-flights" class="{% if _path.startswith('/my-flights') %}active{% endif %}" aria-current="{% if _path.startswith('/my-flights') %}page{% endif %}" role="menuitem">My Flights</a>
+              {% endif %}
+            </div>
+          </details>
+
           {% if current_user and current_user.role == 'admin' %}
-            <a href="/admin" class="{% if _path.startswith('/admin') %}active{% endif %}" aria-current="{% if _path.startswith('/admin') %}page{% endif %}">Admin</a>
-            <a href="/admin/flights" class="{% if _path.startswith('/admin/flights') %}active{% endif %}" aria-current="{% if _path.startswith('/admin/flights') %}page{% endif %}">Admin Flights</a>
-            <a href="/admin/settings" class="{% if _path.startswith('/admin/settings') %}active{% endif %}" aria-current="{% if _path.startswith('/admin/settings') %}page{% endif %}">Admin Settings</a>
+            <details class="navDropdown {% if _path.startswith('/admin') %}active{% endif %}">
+              <summary class="navDropdownSummary">Admin</summary>
+              <div class="navDropdownMenu" role="menu" aria-label="Admin">
+                <a href="/admin" class="{% if _path == '/admin' %}active{% endif %}" aria-current="{% if _path == '/admin' %}page{% endif %}" role="menuitem">Overview</a>
+                <a href="/admin/flights" class="{% if _path.startswith('/admin/flights') %}active{% endif %}" aria-current="{% if _path.startswith('/admin/flights') %}page{% endif %}" role="menuitem">Flights</a>
+                <a href="/admin/settings" class="{% if _path.startswith('/admin/settings') %}active{% endif %}" aria-current="{% if _path.startswith('/admin/settings') %}page{% endif %}" role="menuitem">Settings</a>
+              </div>
+            </details>
           {% endif %}
         </nav>
         <div class="authBox">
@@ -358,6 +206,60 @@
         apiJson,
         csrfToken,
       });
+
+      const navDropdowns = Array.from(document.querySelectorAll('.siteNav .navDropdown'));
+      if(navDropdowns.length){
+        const canHoverDropdowns = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+        const closeTimers = new WeakMap();
+        navDropdowns.forEach((dropdown) => {
+          const clearCloseTimer = () => {
+            const timerId = closeTimers.get(dropdown);
+            if(timerId){
+              window.clearTimeout(timerId);
+              closeTimers.delete(dropdown);
+            }
+          };
+          const scheduleClose = () => {
+            clearCloseTimer();
+            const timerId = window.setTimeout(() => {
+              dropdown.open = false;
+              closeTimers.delete(dropdown);
+            }, 140);
+            closeTimers.set(dropdown, timerId);
+          };
+          dropdown.addEventListener('toggle', () => {
+            if(!dropdown.open) return;
+            navDropdowns.forEach((other) => {
+              if(other !== dropdown) other.open = false;
+            });
+          });
+          if(canHoverDropdowns){
+            dropdown.addEventListener('mouseenter', () => {
+              clearCloseTimer();
+              navDropdowns.forEach((other) => {
+                if(other !== dropdown) other.open = false;
+              });
+              dropdown.open = true;
+            });
+            dropdown.addEventListener('mouseleave', scheduleClose);
+            dropdown.addEventListener('focusin', clearCloseTimer);
+            dropdown.addEventListener('focusout', (event) => {
+              const nextTarget = event.relatedTarget;
+              if(nextTarget instanceof Node && dropdown.contains(nextTarget)) return;
+              scheduleClose();
+            });
+          }
+        });
+        document.addEventListener('click', (event) => {
+          if(!(event.target instanceof Element)) return;
+          if(event.target.closest('.siteNav .navDropdown')) return;
+          navDropdowns.forEach((dropdown) => { dropdown.open = false; });
+        });
+        document.addEventListener('keydown', (event) => {
+          if(event.key !== 'Escape') return;
+          navDropdowns.forEach((dropdown) => { dropdown.open = false; });
+        });
+      }
     })();
   </script>
   {% block scripts %}{% endblock %}

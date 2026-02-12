@@ -24,8 +24,9 @@
     return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
   }
 
-  function initQuarterHourSelect(selectEl, placeholder = 'Select time'){
+  function initQuarterHourSelect(selectEl, placeholder = 'Select time', defaultValue = '06:00'){
     if(!(selectEl instanceof HTMLSelectElement)) return;
+    const previousValue = selectEl.value;
     selectEl.innerHTML = `<option value="">${placeholder}</option>`;
     for(let minutes = 0; minutes < 24 * 60; minutes += 15){
       const hour = Math.floor(minutes / 60);
@@ -38,6 +39,15 @@
       option.value = value;
       option.textContent = label;
       selectEl.appendChild(option);
+    }
+    const hasPrevious = previousValue && Array.from(selectEl.options).some((option) => option.value === previousValue);
+    const hasDefault = defaultValue && Array.from(selectEl.options).some((option) => option.value === defaultValue);
+    if(hasPrevious){
+      selectEl.value = previousValue;
+      return;
+    }
+    if(hasDefault){
+      selectEl.value = defaultValue;
     }
   }
 
