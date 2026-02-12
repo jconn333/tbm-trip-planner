@@ -175,6 +175,73 @@
       border-color:rgba(255,92,112,0.6);
       background:rgba(75,20,28,0.95);
     }
+    .tbmNativeSelect{
+      position:absolute !important;
+      opacity:0 !important;
+      pointer-events:none !important;
+      width:1px !important;
+      height:1px !important;
+      left:-9999px !important;
+    }
+    .tbmCustomSelect{
+      position:relative;
+      width:100%;
+      z-index: 50;
+    }
+    .tbmCustomSelectBtn{
+      width:100%;
+      text-align:left;
+      padding:10px 11px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.18);
+      background:rgba(8,14,28,.5);
+      color:var(--text);
+      cursor:pointer;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      font-size:13px;
+      min-height:40px;
+    }
+    .tbmCustomSelectBtn::after{
+      content:"▾";
+      color:var(--muted);
+      font-size:12px;
+      flex:0 0 auto;
+    }
+    .tbmCustomSelectMenu{
+      position:absolute;
+      top:calc(100% + 6px);
+      left:0;
+      right:0;
+      max-height:240px;
+      overflow:auto;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.16);
+      background:rgba(8,14,28,.98);
+      box-shadow:0 18px 32px rgba(0,0,0,.48);
+      display:none;
+      z-index:120;
+    }
+    .tbmCustomSelectMenu.open{ display:block; }
+    .tbmCustomSelectOption{
+      width:100%;
+      border:0;
+      border-top:1px solid rgba(255,255,255,.06);
+      background:transparent;
+      color:var(--text);
+      text-align:left;
+      padding:8px 11px;
+      cursor:pointer;
+      font-size:13px;
+    }
+    .tbmCustomSelectOption:first-child{ border-top:0; }
+    .tbmCustomSelectOption:hover{ background:rgba(110,168,254,.14); }
+    .tbmCustomSelectOption.active{
+      background:rgba(124,242,194,.18);
+      color:#ebfffa;
+    }
 
     @media (max-width: 720px){
       .page{ padding:20px 12px 54px; }

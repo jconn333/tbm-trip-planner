@@ -33,6 +33,13 @@
 .inline{display:flex;align-items:center;gap:8px;margin-bottom:10px;color:var(--muted);font-size:12px}
 .msg{margin-top:8px;font-size:12px;color:var(--muted);min-height:16px}
 .pendingItemHead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.draftPanel{margin-bottom:12px;border:1px solid rgba(124,242,194,.35);background:rgba(124,242,194,.08);border-radius:12px;padding:10px}
+.draftPanel h4{margin:0 0 8px;font-size:13px}
+.draftLeg{border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:8px;margin-top:8px;background:rgba(10,18,32,.48)}
+.draftLeg:first-of-type{margin-top:0}
+.draftGrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+@media (max-width:980px){.draftGrid{grid-template-columns:1fr}}
+.draftHint{font-size:11px;color:var(--muted);margin-top:6px}
 {% endblock %}
 {% block content %}
 <section class="layout">
@@ -47,19 +54,20 @@
   <div class="panel">
     <h3>Request / Edit Reservation</h3>
     <div class="kv" style="margin-bottom:8px;">Need a full list view? Open <a href="/my-flights">My Flights</a>.</div>
+    <div id="quoteDraftPanel"></div>
 
     <div class="field">
       <label>Departure Date / Time ({{ home_timezone }})</label>
       <div class="dtGrid dtBox" data-dt-box="start" data-date-input="startDate" data-time-input="startTime">
         <input id="startDate" type="date" required />
-        <select id="startTime" required></select>
+        <select id="startTime" class="js-custom-select" required></select>
       </div>
     </div>
     <div class="field">
       <label>Arrival Date / Time ({{ home_timezone }})</label>
       <div class="dtGrid dtBox" data-dt-box="end" data-date-input="endDate" data-time-input="endTime">
         <input id="endDate" type="date" required />
-        <select id="endTime" required></select>
+        <select id="endTime" class="js-custom-select" required></select>
       </div>
     </div>
     <div class="field" id="depIcaoField">
@@ -74,7 +82,7 @@
     </div>
     <div class="field">
       <label for="travelingOwner">Traveling Owner</label>
-      <select id="travelingOwner"></select>
+      <select id="travelingOwner" class="js-custom-select"></select>
     </div>
     <div class="field">
       <label for="reservationNotes">Notes</label>
@@ -123,8 +131,11 @@
     upcomingList: document.getElementById('upcomingList'),
     availabilityMeta: document.getElementById('availabilityMeta')
   };
+  const quoteDraftPanel = document.getElementById('quoteDraftPanel');
 
   let editingId = null;
+  let activeDraftToken = '';
+  let activeDraftData = null;
 
   function setMsg(message, isError){
     el.formMsg.textContent = message || '';
@@ -190,6 +201,113 @@
     setMsg('');
   }
 
+  function localIsoToDateTime(isoLocal){
+    const dt = new Date(isoLocal);
+    if(Number.isNaN(dt.getTime())) return { date:'', time:'' };
+    const year = dt.getFullYear();
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    const hour = String(dt.getHours()).padStart(2, '0');
+    const minute = String(dt.getMinutes()).padStart(2, '0');
+    return { date: `${year}-${month}-${day}`, time: `${hour}:${minute}` };
+  }
+
+  function escapeHtml(value){
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function prefillFormFromLeg(leg){
+    const start = localIsoToDateTime(leg.start_local);
+    const end = localIsoToDateTime(leg.end_local);
+    el.startDate.value = start.date;
+    el.startTime.value = toQuarterHour(start.time);
+    el.endDate.value = end.date;
+    el.endTime.value = toQuarterHour(end.time);
+    applyEndConstraints();
+    el.depIcao.value = (leg.dep_icao || '').toUpperCase();
+    el.destIcao.value = (leg.dest_icao || '').toUpperCase();
+    el.reservationNotes.value = leg.notes || '';
+    setMsg('Draft leg loaded into reservation form.');
+  }
+
+  function readDraftLegOverrides(){
+    if(!activeDraftData || !Array.isArray(activeDraftData.legs)) return [];
+    return activeDraftData.legs.map((_, index)=>{
+      const read = (suffix) => document.getElementById(`draftLeg${index}_${suffix}`);
+      const startDate = read('startDate')?.value || '';
+      const startTime = read('startTime')?.value || '';
+      const endDate = read('endDate')?.value || '';
+      const endTime = read('endTime')?.value || '';
+      return {
+        start_local: `${startDate}T${startTime}`,
+        end_local: `${endDate}T${endTime}`,
+        dep_icao: (read('dep')?.value || '').trim().toUpperCase(),
+        dest_icao: (read('dest')?.value || '').trim().toUpperCase(),
+        notes: (read('notes')?.value || '').trim(),
+      };
+    });
+  }
+
+  function renderDraftPanel(){
+    if(!quoteDraftPanel) return;
+    if(!activeDraftData){
+      quoteDraftPanel.innerHTML = '';
+      return;
+    }
+    const isRoundtrip = activeDraftData.trip_type === 'roundtrip' && Array.isArray(activeDraftData.legs) && activeDraftData.legs.length > 1;
+    const legsHtml = (activeDraftData.legs || []).map((leg, index)=>{
+      const start = localIsoToDateTime(leg.start_local);
+      const end = localIsoToDateTime(leg.end_local);
+      const dep = escapeHtml((leg.dep_icao || '').toUpperCase());
+      const dest = escapeHtml((leg.dest_icao || '').toUpperCase());
+      const notes = escapeHtml(leg.notes || '');
+      return `
+        <div class="draftLeg">
+          <strong>Leg ${index + 1}: ${dep} -> ${dest}</strong>
+          <div class="draftGrid" style="margin-top:6px;">
+            <input id="draftLeg${index}_startDate" type="date" value="${start.date}" />
+            <select id="draftLeg${index}_startTime" class="js-custom-select"></select>
+            <input id="draftLeg${index}_endDate" type="date" value="${end.date}" />
+            <select id="draftLeg${index}_endTime" class="js-custom-select"></select>
+            <input id="draftLeg${index}_dep" type="text" maxlength="4" value="${dep}" />
+            <input id="draftLeg${index}_dest" type="text" maxlength="4" value="${dest}" />
+          </div>
+          <textarea id="draftLeg${index}_notes" style="margin-top:6px;width:100%;min-height:58px;border:1px solid rgba(255,255,255,.18);background:rgba(8,14,28,.5);color:var(--text);border-radius:10px;padding:8px 10px;">${notes}</textarea>
+          ${!isRoundtrip ? `<div class="draftHint">Use "Apply to form" then submit with the normal button.</div>` : ''}
+          <div class="actions" style="margin-top:6px;">
+            <button class="btn small" type="button" data-apply-leg="${index}">Apply to Form</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    quoteDraftPanel.innerHTML = `
+      <div class="draftPanel">
+        <h4>Quote Draft (${(activeDraftData.trip_type || 'oneway').toUpperCase()})</h4>
+        <div class="kv">Expires: ${(activeDraftData.expires_at || '').slice(0, 16).replace('T', ' ')}</div>
+        ${legsHtml}
+        ${isRoundtrip ? `<div class="actions" style="margin-top:10px;">
+          <button class="btn primary" id="submitDraftRoundtripBtn" type="button">Submit 2 Requests</button>
+        </div>` : ''}
+      </div>
+    `;
+
+    (activeDraftData.legs || []).forEach((leg, index)=>{
+      const startSelect = document.getElementById(`draftLeg${index}_startTime`);
+      const endSelect = document.getElementById(`draftLeg${index}_endTime`);
+      initQuarterHourSelect(startSelect);
+      initQuarterHourSelect(endSelect);
+      startSelect.value = toQuarterHour(localIsoToDateTime(leg.start_local).time);
+      endSelect.value = toQuarterHour(localIsoToDateTime(leg.end_local).time);
+    });
+    if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
+  }
+
   function setReservationIntoForm(reservation){
     editingId = parseInt(reservation.id, 10);
     el.saveBtn.textContent = 'Save Changes';
@@ -214,6 +332,7 @@
     if (!resp.ok) return;
     const owners = await resp.json();
     el.travelingOwner.innerHTML = owners.map((owner)=>`<option value="${owner.id}">${owner.name}</option>`).join('');
+    if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
   }
 
   async function loadMyPendingReservations(){
@@ -260,6 +379,24 @@
     });
   }
 
+  async function loadQuoteDraftIfPresent(){
+    const params = new URLSearchParams(window.location.search);
+    const token = (params.get('draft') || '').trim();
+    if(!token) return;
+    activeDraftToken = token;
+    const resp = await fetch(`/api/planner/quote-drafts/${encodeURIComponent(token)}`);
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok){
+      setMsg(data.error || 'Unable to load quote draft.', true);
+      return;
+    }
+    activeDraftData = data;
+    renderDraftPanel();
+    if(Array.isArray(data.legs) && data.legs.length > 0){
+      prefillFormFromLeg(data.legs[0]);
+    }
+  }
+
   function payloadFromForm(){
     return {
       start_date: el.startDate.value,
@@ -283,6 +420,7 @@
   if(window.TBMDateTimeBox){ window.TBMDateTimeBox.bindAll(document); }
   initQuarterHourSelect(el.startTime);
   initQuarterHourSelect(el.endTime);
+  if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
 
   const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
     initialView:'dayGridMonth',
@@ -316,6 +454,45 @@
     setReservationIntoForm(row);
   });
 
+  quoteDraftPanel.addEventListener('click', async (event)=>{
+    const target = event.target;
+    if(!(target instanceof HTMLElement)) return;
+    const applyLeg = target.getAttribute('data-apply-leg');
+    if(applyLeg !== null){
+      if(!activeDraftData || !Array.isArray(activeDraftData.legs)) return;
+      const index = parseInt(applyLeg, 10);
+      const overrides = readDraftLegOverrides();
+      const leg = overrides[index];
+      if(!leg) return;
+      prefillFormFromLeg(leg);
+      return;
+    }
+    if(target.id === 'submitDraftRoundtripBtn'){
+      if(!activeDraftToken){
+        setMsg('Draft token missing.', true);
+        return;
+      }
+      const legs = readDraftLegOverrides();
+      const resp = await fetch(`/api/planner/quote-drafts/${encodeURIComponent(activeDraftToken)}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ legs }),
+      });
+      const data = await resp.json().catch(()=>({}));
+      if(!resp.ok){
+        setMsg(data.error || 'Draft submission failed.', true);
+        return;
+      }
+      setMsg('Roundtrip requests submitted from quote draft.');
+      activeDraftData = null;
+      activeDraftToken = '';
+      renderDraftPanel();
+      calendar.refetchEvents();
+      loadMyPendingReservations();
+      loadSummary();
+    }
+  });
+
   el.startDate.addEventListener('change', applyEndConstraints);
   el.includeNonBlocking.addEventListener('change', ()=> calendar.refetchEvents());
   el.clearBtn.addEventListener('click', ()=> resetForm());
@@ -323,12 +500,41 @@
   el.saveBtn.addEventListener('click', async ()=>{
     if(!validateDateTimeOrder()) return;
     const payload = payloadFromForm();
-    const endpoint = editingId ? `/api/reservations/${editingId}` : '/api/reservation-requests';
-    const method = editingId ? 'PATCH' : 'POST';
-    const resp = await fetch(endpoint, { method, headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) });
+    let endpoint = editingId ? `/api/reservations/${editingId}` : '/api/reservation-requests';
+    let method = editingId ? 'PATCH' : 'POST';
+    let requestBody = payload;
+
+    const isOneWayDraftSubmit = !editingId
+      && !!activeDraftToken
+      && !!activeDraftData
+      && activeDraftData.trip_type === 'oneway';
+    if(isOneWayDraftSubmit){
+      endpoint = `/api/planner/quote-drafts/${encodeURIComponent(activeDraftToken)}/submit`;
+      method = 'POST';
+      requestBody = {
+        legs: [{
+          start_local: `${payload.start_date}T${payload.start_time}`,
+          end_local: `${payload.end_date}T${payload.end_time}`,
+          dep_icao: payload.dep_icao,
+          dest_icao: payload.dest_icao,
+          notes: payload.notes,
+        }],
+      };
+    }
+
+    const resp = await fetch(endpoint, { method, headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(requestBody) });
     const data = await resp.json().catch(()=>({}));
     if(!resp.ok){ setMsg(data.error || 'Request failed', true); return; }
-    setMsg(editingId ? 'Pending request updated and re-submitted.' : 'Reservation request submitted.');
+    if(editingId){
+      setMsg('Pending request updated and re-submitted.');
+    } else if(isOneWayDraftSubmit){
+      setMsg('Reservation request submitted from quote draft.');
+      activeDraftData = null;
+      activeDraftToken = '';
+      renderDraftPanel();
+    } else {
+      setMsg('Reservation request submitted.');
+    }
     resetForm();
     calendar.refetchEvents();
     loadMyPendingReservations();
@@ -348,6 +554,7 @@
   });
 
   loadOwners();
+  loadQuoteDraftIfPresent();
   loadMyPendingReservations();
   loadSummary();
   calendar.render();

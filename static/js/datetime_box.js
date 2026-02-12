@@ -1,6 +1,16 @@
 (() => {
   function openPicker(element){
     if(!element) return;
+    if(element instanceof HTMLSelectElement){
+      const triggerId = element.dataset.customSelectTriggerId;
+      if(triggerId){
+        const trigger = document.getElementById(triggerId);
+        if(trigger){
+          trigger.click();
+          return;
+        }
+      }
+    }
     if(typeof element.showPicker === 'function'){
       try {
         element.showPicker();

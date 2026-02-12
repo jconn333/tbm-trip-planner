@@ -19,8 +19,8 @@
     <div class="field"><label for="home_timezone">Home Timezone</label><input id="home_timezone" type="text" /></div>
     <div class="field"><label for="reservation_min_minutes">Min Reservation Minutes</label><input id="reservation_min_minutes" type="number" min="1" /></div>
     <div class="field"><label for="reservation_max_days">Max Reservation Days</label><input id="reservation_max_days" type="number" min="1" /></div>
-    <div class="field"><label for="admin_flights_default_scope">Admin Flights Default Scope</label><select id="admin_flights_default_scope"><option value="future_only">Future Only</option><option value="all">All History</option></select></div>
-    <div class="field"><label for="user_show_closed_default">User Show Closed Default</label><select id="user_show_closed_default"><option value="false">False</option><option value="true">True</option></select></div>
+    <div class="field"><label for="admin_flights_default_scope">Admin Flights Default Scope</label><select id="admin_flights_default_scope" class="js-custom-select"><option value="future_only">Future Only</option><option value="all">All History</option></select></div>
+    <div class="field"><label for="user_show_closed_default">User Show Closed Default</label><select id="user_show_closed_default" class="js-custom-select"><option value="false">False</option><option value="true">True</option></select></div>
   </div>
   <div style="margin-top:10px;"><button id="saveBtn" class="btn" type="button">Save Settings</button></div>
   <div id="msg" class="meta"></div>
@@ -74,6 +74,7 @@
     loadHistory();
   });
 
+  if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
   loadSettings();
   loadHistory();
 })();

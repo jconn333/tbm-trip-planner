@@ -7,6 +7,7 @@ from typing import Iterable
 BLOCKING_STATUSES = ("pending", "approved")
 ALL_STATUSES = ("pending", "approved", "denied", "canceled")
 CHANGE_REQUEST_STATUSES = ("pending", "approved", "denied", "applied", "canceled")
+PLANNER_DRAFT_STATUSES = ("open", "consumed", "expired")
 
 
 def utc_now_iso() -> str:
@@ -123,6 +124,29 @@ def migrate_if_needed(conn: sqlite3.Connection) -> None:
             CREATE INDEX IF NOT EXISTS idx_settings_audit_changed_at ON settings_audit_log(changed_at_utc DESC);
 
             PRAGMA user_version = 3;
+            """
+        )
+        version = 3
+
+    if version < 4:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS planner_quote_drafts (
+                id INTEGER PRIMARY KEY,
+                token TEXT NOT NULL UNIQUE,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                status TEXT NOT NULL CHECK(status IN ('open', 'consumed', 'expired')),
+                draft_json TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL,
+                expires_at_utc TEXT NOT NULL,
+                consumed_at_utc TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_planner_drafts_token ON planner_quote_drafts(token);
+            CREATE INDEX IF NOT EXISTS idx_planner_drafts_user_status ON planner_quote_drafts(user_id, status);
+            CREATE INDEX IF NOT EXISTS idx_planner_drafts_expires ON planner_quote_drafts(expires_at_utc);
+
+            PRAGMA user_version = 4;
             """
         )
 
@@ -644,3 +668,74 @@ def update_change_request_fields(conn: sqlite3.Connection, request_id: int, fiel
     conn.execute(f"UPDATE reservation_change_requests SET {assignments} WHERE id = ?", tuple(values))
     conn.commit()
     return get_change_request_by_id(conn, request_id)
+
+
+def create_planner_quote_draft(
+    conn: sqlite3.Connection,
+    *,
+    token: str,
+    user_id: int,
+    draft_json: str,
+    expires_at_utc: str,
+):
+    now = utc_now_iso()
+    cur = conn.execute(
+        """
+        INSERT INTO planner_quote_drafts (
+            token, user_id, status, draft_json, created_at_utc, expires_at_utc, consumed_at_utc
+        ) VALUES (?, ?, 'open', ?, ?, ?, NULL)
+        """,
+        (token, int(user_id), draft_json, now, expires_at_utc),
+    )
+    conn.commit()
+    return get_planner_quote_draft_by_id(conn, int(cur.lastrowid))
+
+
+def get_planner_quote_draft_by_id(conn: sqlite3.Connection, draft_id: int):
+    return conn.execute(
+        """
+        SELECT d.*
+        FROM planner_quote_drafts d
+        WHERE d.id = ?
+        """,
+        (int(draft_id),),
+    ).fetchone()
+
+
+def get_planner_quote_draft_by_token(conn: sqlite3.Connection, token: str):
+    return conn.execute(
+        """
+        SELECT d.*
+        FROM planner_quote_drafts d
+        WHERE d.token = ?
+        """,
+        (token,),
+    ).fetchone()
+
+
+def expire_open_planner_quote_drafts(conn: sqlite3.Connection, *, now_utc: str):
+    conn.execute(
+        """
+        UPDATE planner_quote_drafts
+        SET status = 'expired'
+        WHERE status = 'open'
+          AND expires_at_utc <= ?
+        """,
+        (now_utc,),
+    )
+    conn.commit()
+
+
+def consume_planner_quote_draft(conn: sqlite3.Connection, draft_id: int, *, consumed_at_utc: str):
+    conn.execute(
+        """
+        UPDATE planner_quote_drafts
+        SET status = 'consumed',
+            consumed_at_utc = ?
+        WHERE id = ?
+          AND status = 'open'
+        """,
+        (consumed_at_utc, int(draft_id)),
+    )
+    conn.commit()
+    return get_planner_quote_draft_by_id(conn, int(draft_id))

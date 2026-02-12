@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import wraps
 import secrets
 
-from flask import g, jsonify, redirect, request, session, url_for
+from flask import current_app, g, jsonify, redirect, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
@@ -25,7 +25,8 @@ def login_required(view):
         if not getattr(g, "current_user", None):
             if is_api_request():
                 return jsonify({"error": "Authentication required.", "code": "auth_required"}), 401
-            return redirect(url_for("login", next=request.path))
+            login_endpoint = "auth_routes.login" if "auth_routes.login" in current_app.view_functions else "login"
+            return redirect(url_for(login_endpoint, next=request.path))
         return view(*args, **kwargs)
 
     return wrapped
@@ -38,7 +39,8 @@ def admin_required(view):
         if not user:
             if is_api_request():
                 return jsonify({"error": "Authentication required.", "code": "auth_required"}), 401
-            return redirect(url_for("login", next=request.path))
+            login_endpoint = "auth_routes.login" if "auth_routes.login" in current_app.view_functions else "login"
+            return redirect(url_for(login_endpoint, next=request.path))
         if user["role"] != "admin":
             if is_api_request():
                 return jsonify({"error": "Admin privileges required.", "code": "forbidden"}), 403

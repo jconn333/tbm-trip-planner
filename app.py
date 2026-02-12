@@ -123,6 +123,7 @@ TBM_BOOTSTRAP_ADMIN_NAME = (os.getenv("TBM_BOOTSTRAP_ADMIN_NAME") or "").strip()
 TBM_BOOTSTRAP_ADMIN_PASSWORD = (os.getenv("TBM_BOOTSTRAP_ADMIN_PASSWORD") or "").strip()
 RESERVATION_MIN_MINUTES = _env_int("TBM_RESERVATION_MIN_MINUTES", 15)
 RESERVATION_MAX_DAYS = _env_int("TBM_RESERVATION_MAX_DAYS", 45)
+PLANNER_DRAFT_TTL_SEC = _env_int("TBM_PLANNER_DRAFT_TTL_SEC", 7200)
 
 ICAO_RE = re.compile(r"^[A-Z][A-Z0-9]{3}$")
 AIRPORT_CODE_RE = re.compile(r"^[A-Z0-9]{2,4}$")
@@ -573,6 +574,208 @@ def _validate_reservation_fields(
         "traveling_user_id": traveling_user_id,
         "notes": notes.strip(),
     }, None
+
+
+def _quote_draft_token() -> str:
+    return secrets.token_urlsafe(24)
+
+
+def _iso_local_minute(dt_local: datetime) -> str:
+    return dt_local.replace(second=0, microsecond=0).isoformat(timespec="minutes")
+
+
+def _ceil_to_quarter_hour(dt_local: datetime) -> datetime:
+    base = dt_local.replace(second=0, microsecond=0)
+    remainder = base.minute % 15
+    if remainder == 0:
+        return base
+    return base + timedelta(minutes=(15 - remainder))
+
+
+def _parse_required_local_departure(raw: object, *, field: str):
+    dt_local = _parse_local_datetime(str(raw or "").strip())
+    if not dt_local:
+        return None, {
+            "message": f"{field} must be a valid local datetime in YYYY-MM-DDTHH:MM format.",
+            "code": "invalid_datetime",
+            "field": field,
+            "status": 400,
+        }
+    if (dt_local.minute % 15) != 0 or dt_local.second != 0:
+        return None, {
+            "message": f"{field} must be in 15-minute increments.",
+            "code": "invalid_time_increment",
+            "field": field,
+            "status": 400,
+        }
+    return dt_local, None
+
+
+def _validate_estimate_for_quote_draft(estimate_payload: object):
+    if not isinstance(estimate_payload, dict):
+        return None, {
+            "message": "estimate is required and must be an object.",
+            "code": "invalid_estimate",
+            "field": "estimate",
+            "status": 400,
+        }
+
+    inputs = estimate_payload.get("inputs")
+    if not isinstance(inputs, dict):
+        return None, {
+            "message": "estimate.inputs is required.",
+            "code": "invalid_estimate",
+            "field": "estimate.inputs",
+            "status": 400,
+        }
+
+    trip_input, err = _validate_trip_inputs(
+        dep_raw=inputs.get("dep"),
+        dest_raw=inputs.get("dest"),
+        trip_type_raw=inputs.get("trip_type"),
+        depart_date_raw=inputs.get("depart_date"),
+        return_date_raw=inputs.get("return_date"),
+    )
+    if err:
+        return None, {
+            "message": f"estimate payload invalid: {err['message']}",
+            "code": "invalid_estimate",
+            "field": "estimate.inputs",
+            "status": 400,
+        }
+
+    legs = estimate_payload.get("legs")
+    if not isinstance(legs, list) or len(legs) < 1:
+        return None, {
+            "message": "estimate.legs must include at least one leg.",
+            "code": "invalid_estimate",
+            "field": "estimate.legs",
+            "status": 400,
+        }
+    if trip_input["trip_type"] == "roundtrip" and len(legs) < 2:
+        return None, {
+            "message": "Roundtrip estimate must include outbound and return legs.",
+            "code": "invalid_estimate",
+            "field": "estimate.legs",
+            "status": 400,
+        }
+
+    parsed_legs: list[dict] = []
+    expected_routes = [(trip_input["dep"], trip_input["dest"])]
+    if trip_input["trip_type"] == "roundtrip":
+        expected_routes.append((trip_input["dest"], trip_input["dep"]))
+
+    max_duration_minutes = _effective_reservation_max_days() * 24 * 60
+    for index, (dep_expected, dest_expected) in enumerate(expected_routes):
+        leg = legs[index] if index < len(legs) and isinstance(legs[index], dict) else {}
+        typical = leg.get("typical") if isinstance(leg.get("typical"), dict) else {}
+        try:
+            duration_minutes = int(typical.get("minutes"))
+        except Exception:
+            duration_minutes = 0
+        if duration_minutes < _effective_reservation_min_minutes():
+            return None, {
+                "message": f"Leg {index + 1} duration is below minimum reservation duration.",
+                "code": "invalid_estimate",
+                "field": "estimate.legs",
+                "status": 400,
+            }
+        if duration_minutes > max_duration_minutes:
+            return None, {
+                "message": f"Leg {index + 1} duration exceeds maximum reservation duration.",
+                "code": "invalid_estimate",
+                "field": "estimate.legs",
+                "status": 400,
+            }
+        parsed_legs.append(
+            {
+                "dep_icao": dep_expected,
+                "dest_icao": dest_expected,
+                "duration_minutes": duration_minutes,
+            }
+        )
+
+    return {
+        "trip_type": trip_input["trip_type"],
+        "dep_icao": trip_input["dep"],
+        "dest_icao": trip_input["dest"],
+        "depart_date": trip_input["depart_date"].isoformat(),
+        "return_date": trip_input["return_date"].isoformat() if trip_input["return_date"] else None,
+        "legs": parsed_legs,
+    }, None
+
+
+def _build_quote_draft_payload(estimate_data: dict, outbound_departure_local: datetime, return_departure_local: datetime | None):
+    legs: list[dict] = []
+    outbound = estimate_data["legs"][0]
+    outbound_end = _ceil_to_quarter_hour(outbound_departure_local + timedelta(minutes=int(outbound["duration_minutes"])))
+    legs.append(
+        {
+            "dep_icao": outbound["dep_icao"],
+            "dest_icao": outbound["dest_icao"],
+            "start_local": _iso_local_minute(outbound_departure_local),
+            "end_local": _iso_local_minute(outbound_end),
+            "duration_minutes": int(outbound["duration_minutes"]),
+            "notes": f"Quote-based {estimate_data['trip_type']} request ({outbound['dep_icao']} → {outbound['dest_icao']}).",
+        }
+    )
+    if estimate_data["trip_type"] == "roundtrip":
+        return_leg = estimate_data["legs"][1]
+        return_start = return_departure_local
+        return_end = _ceil_to_quarter_hour(return_start + timedelta(minutes=int(return_leg["duration_minutes"])))
+        legs.append(
+            {
+                "dep_icao": return_leg["dep_icao"],
+                "dest_icao": return_leg["dest_icao"],
+                "start_local": _iso_local_minute(return_start),
+                "end_local": _iso_local_minute(return_end),
+                "duration_minutes": int(return_leg["duration_minutes"]),
+                "notes": f"Quote-based {estimate_data['trip_type']} request ({return_leg['dep_icao']} → {return_leg['dest_icao']}).",
+            }
+        )
+    return {
+        "trip_type": estimate_data["trip_type"],
+        "dep_icao": estimate_data["dep_icao"],
+        "dest_icao": estimate_data["dest_icao"],
+        "depart_date": estimate_data["depart_date"],
+        "return_date": estimate_data["return_date"],
+        "legs": legs,
+    }
+
+
+def _planner_quote_draft_payload(row) -> dict:
+    draft_payload = json.loads(row["draft_json"])
+    return {
+        "token": row["token"],
+        "status": row["status"],
+        "trip_type": draft_payload.get("trip_type", "oneway"),
+        "legs": draft_payload.get("legs", []),
+        "dep_icao": draft_payload.get("dep_icao"),
+        "dest_icao": draft_payload.get("dest_icao"),
+        "expires_at": _utc_iso_to_local_iso(row["expires_at_utc"]),
+    }
+
+
+def _planner_quote_draft_row_or_error(conn, *, token: str, user_id: int):
+    now_utc = _utc_now().isoformat()
+    storage.expire_open_planner_quote_drafts(conn, now_utc=now_utc)
+    row = storage.get_planner_quote_draft_by_token(conn, token)
+    if not row:
+        return None, {"message": "Draft not found.", "code": "not_found", "status": 404}
+    if int(row["user_id"]) != int(user_id):
+        return None, {"message": "Draft not found.", "code": "not_found", "status": 404}
+    if row["status"] != "open":
+        if row["status"] == "expired":
+            return None, {"message": "This draft has expired.", "code": "draft_expired", "status": 410}
+        return None, {"message": "This draft has already been submitted.", "code": "draft_consumed", "status": 409}
+    if row["expires_at_utc"] <= now_utc:
+        conn.execute(
+            "UPDATE planner_quote_drafts SET status = 'expired' WHERE id = ? AND status = 'open'",
+            (int(row["id"]),),
+        )
+        conn.commit()
+        return None, {"message": "This draft has expired.", "code": "draft_expired", "status": 410}
+    return row, None
 
 
 def _bootstrap_admin_if_configured() -> None:
@@ -2188,6 +2391,7 @@ def api_nearest_airports():
 
 # ------------------ API: estimate (machine-readable) ------------------
 @app.post("/api/estimate")
+@login_required
 def api_estimate():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -2222,6 +2426,212 @@ def api_estimate():
         assumptions=assumption_overrides,
     )
     return jsonify(est)
+
+
+@app.post("/api/planner/quote-drafts")
+@login_required
+def api_create_planner_quote_draft():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _json_error("Request body must be a JSON object.", 400, "invalid_json")
+
+    estimate_data, estimate_err = _validate_estimate_for_quote_draft(data.get("estimate"))
+    if estimate_err:
+        return _json_error(
+            estimate_err["message"],
+            estimate_err["status"],
+            estimate_err["code"],
+            estimate_err.get("field"),
+        )
+
+    outbound_departure_local, outbound_err = _parse_required_local_departure(
+        data.get("outbound_departure_local"),
+        field="outbound_departure_local",
+    )
+    if outbound_err:
+        return _json_error(
+            outbound_err["message"],
+            outbound_err["status"],
+            outbound_err["code"],
+            outbound_err.get("field"),
+        )
+
+    return_departure_local = None
+    if estimate_data["trip_type"] == "roundtrip":
+        return_departure_local, return_err = _parse_required_local_departure(
+            data.get("return_departure_local"),
+            field="return_departure_local",
+        )
+        if return_err:
+            return _json_error(
+                return_err["message"],
+                return_err["status"],
+                return_err["code"],
+                return_err.get("field"),
+            )
+
+    draft_payload = _build_quote_draft_payload(estimate_data, outbound_departure_local, return_departure_local)
+    if draft_payload["trip_type"] == "roundtrip":
+        outbound_end = _parse_local_datetime(draft_payload["legs"][0]["end_local"])
+        return_start = _parse_local_datetime(draft_payload["legs"][1]["start_local"])
+        if not outbound_end or not return_start or return_start <= outbound_end:
+            return _json_error(
+                "return_departure_local must be after outbound arrival time.",
+                400,
+                "invalid_datetime",
+                "return_departure_local",
+            )
+
+    expires_at_utc = (_utc_now() + timedelta(seconds=PLANNER_DRAFT_TTL_SEC)).isoformat()
+    token = _quote_draft_token()
+    with _db_conn() as conn:
+        created = storage.create_planner_quote_draft(
+            conn,
+            token=token,
+            user_id=int(g.current_user["id"]),
+            draft_json=json.dumps(draft_payload),
+            expires_at_utc=expires_at_utc,
+        )
+
+    return jsonify(
+        {
+            "token": created["token"],
+            "expires_at": _utc_iso_to_local_iso(created["expires_at_utc"]),
+            "draft_preview": _planner_quote_draft_payload(created),
+        }
+    ), 201
+
+
+@app.get("/api/planner/quote-drafts/<string:token>")
+@login_required
+def api_get_planner_quote_draft(token: str):
+    with _db_conn() as conn:
+        row, err = _planner_quote_draft_row_or_error(conn, token=token, user_id=int(g.current_user["id"]))
+        if err:
+            return _json_error(err["message"], err["status"], err["code"])
+        return jsonify(_planner_quote_draft_payload(row))
+
+
+@app.post("/api/planner/quote-drafts/<string:token>/submit")
+@login_required
+def api_submit_planner_quote_draft(token: str):
+    with _db_conn() as conn:
+        row, err = _planner_quote_draft_row_or_error(conn, token=token, user_id=int(g.current_user["id"]))
+        if err:
+            return _json_error(err["message"], err["status"], err["code"])
+
+        payload = request.get_json(silent=True) or {}
+        if payload and not isinstance(payload, dict):
+            return _json_error("Request body must be a JSON object.", 400, "invalid_json")
+
+        draft_payload = json.loads(row["draft_json"])
+        legs = draft_payload.get("legs")
+        if not isinstance(legs, list) or not legs:
+            return _json_error("Draft does not contain any reservation legs.", 400, "invalid_draft")
+
+        overrides = payload.get("legs")
+        if overrides is not None:
+            if not isinstance(overrides, list) or len(overrides) != len(legs):
+                return _json_error("legs override must be an array matching draft leg count.", 400, "invalid_legs", "legs")
+            for index, override in enumerate(overrides):
+                if not isinstance(override, dict):
+                    return _json_error("Each legs override item must be an object.", 400, "invalid_legs", "legs")
+                leg = dict(legs[index])
+                for key in ("start_local", "end_local", "dep_icao", "dest_icao", "notes"):
+                    if key in override and str(override[key]).strip():
+                        leg[key] = str(override[key]).strip()
+                legs[index] = leg
+
+        normalized_legs: list[dict] = []
+        for index, leg in enumerate(legs):
+            leg_payload = {
+                "start_local": leg.get("start_local"),
+                "end_local": leg.get("end_local"),
+                "dep_icao": leg.get("dep_icao"),
+                "dest_icao": leg.get("dest_icao"),
+                "notes": leg.get("notes") or "",
+                "traveling_user_id": int(g.current_user["id"]),
+            }
+            normalized, validation_err = _validate_reservation_fields(
+                leg_payload,
+                current_user=g.current_user,
+            )
+            if validation_err:
+                return _json_error(
+                    f"Leg {index + 1}: {validation_err['message']}",
+                    validation_err["status"],
+                    validation_err["code"],
+                    validation_err.get("field"),
+                )
+            normalized_legs.append(normalized)
+
+        if len(normalized_legs) >= 2:
+            ordered = sorted(normalized_legs, key=lambda item: item["start_utc"])
+            for idx in range(1, len(ordered)):
+                if ordered[idx]["start_utc"] < ordered[idx - 1]["end_utc"]:
+                    return _json_error(
+                        "Draft legs overlap each other. Adjust departure times before submitting.",
+                        409,
+                        "overlap_conflict",
+                    )
+
+        for normalized in normalized_legs:
+            if storage.overlap_exists(
+                conn,
+                start_utc=normalized["start_utc"],
+                end_utc=normalized["end_utc"],
+            ):
+                return _json_error(
+                    "One or more draft legs overlap an existing reservation.",
+                    409,
+                    "overlap_conflict",
+                )
+
+        now_utc = _utc_now().isoformat()
+        try:
+            created_rows = []
+            for normalized in normalized_legs:
+                cur = conn.execute(
+                    """
+                    INSERT INTO reservations (
+                        status, start_utc, end_utc, dep_icao, dest_icao, parked_icao,
+                        traveling_user_id, requested_by_user_id, notes, created_at_utc, updated_at_utc
+                    ) VALUES ('pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        normalized["start_utc"],
+                        normalized["end_utc"],
+                        normalized["dep_icao"],
+                        normalized["dest_icao"],
+                        normalized["parked_icao"],
+                        int(g.current_user["id"]),
+                        int(g.current_user["id"]),
+                        normalized["notes"],
+                        now_utc,
+                        now_utc,
+                    ),
+                )
+                created_rows.append(storage.get_reservation_by_id(conn, int(cur.lastrowid)))
+            conn.execute(
+                """
+                UPDATE planner_quote_drafts
+                SET status = 'consumed', consumed_at_utc = ?
+                WHERE id = ?
+                  AND status = 'open'
+                """,
+                (now_utc, int(row["id"])),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    return jsonify(
+        {
+            "ok": True,
+            "created": [_reservation_to_event_payload(item, g.current_user) for item in created_rows],
+        }
+    )
 
 
 def _extract_trip_from_message(message: str):
@@ -2281,11 +2691,13 @@ def api_chat():
 
 # ------------------ UI: pages ------------------
 @app.get("/")
+@login_required
 def home():
     return render_template("home.html", **_home_context())
 
 
 @app.post("/estimate")
+@login_required
 def estimate_page():
     form_values = {
         "dep": (request.form.get("dep_icao") or "").strip().upper(),

@@ -432,7 +432,7 @@
             <div class="row">
               <div class="field">
                 <label for="trip_type">Trip type</label>
-                <select id="trip_type" name="trip_type">
+                <select id="trip_type" name="trip_type" class="js-custom-select">
                   <option value="oneway" {% if (form_values.trip_type or "oneway") == "oneway" %}selected{% endif %}>One-way</option>
                   <option value="roundtrip" {% if form_values.trip_type == "roundtrip" %}selected{% endif %}>Round trip</option>
                 </select>
@@ -602,6 +602,7 @@
     const destEl = document.getElementById("dest");
     setupAirportAutocomplete(depEl, document.getElementById("depSug"));
     setupAirportAutocomplete(destEl, document.getElementById("destSug"));
+    if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
 
     // ---------- Address -> nearest airports ----------
     const addressLookupInput = document.getElementById("addressLookupInput");

@@ -187,6 +187,75 @@
     .kpi .label{ color: var(--muted); font-size: 12px; }
     .kpi .value{ font-size: 19px; font-weight: 800; margin-top: 4px; letter-spacing: 0.15px; }
     .kpi .sub{ color: var(--muted2); font-size: 12px; margin-top: 4px; }
+    .requestPanel{
+      margin-top: 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(124,242,194,0.34);
+      background:
+        radial-gradient(150% 140% at 0% 0%, rgba(124,242,194,0.12), rgba(124,242,194,0) 60%),
+        rgba(255,255,255,0.04);
+      padding: 12px;
+    }
+    .requestPanel h3{
+      margin: 0;
+      font-size: 14px;
+      letter-spacing: 0.1px;
+    }
+    .requestGrid{
+      margin-top: 10px;
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap: 8px;
+    }
+    @media (max-width: 560px){
+      .requestGrid{ grid-template-columns: 1fr; }
+    }
+    .requestField label{
+      display:block;
+      margin: 0 0 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .requestField input, .requestField select{
+      width:100%;
+      padding:10px 11px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(7,12,22,0.62);
+      color: var(--text);
+      font-size: 13px;
+      position: relative;
+      z-index: 1;
+    }
+    .requestActions{
+      margin-top: 10px;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .requestBtn{
+      border:1px solid rgba(124,242,194,0.52);
+      background: linear-gradient(135deg, rgba(110,168,254,0.75), rgba(124,242,194,0.52));
+      color:#0b1220;
+      border-radius:999px;
+      padding:9px 13px;
+      font-size:12.5px;
+      font-weight: 760;
+      cursor:pointer;
+    }
+    .requestMeta{
+      margin-top:8px;
+      color:var(--muted2);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .requestErr{
+      color: rgba(255,188,198,0.96);
+      font-size: 12px;
+      min-height: 16px;
+      margin-top: 6px;
+    }
 
     /* Map */
     #map{
@@ -372,6 +441,33 @@
               <div class="sub" id="kpiFuelSub">{{ fuel_burn_gph }} gph · ${{ fuel_price }}/gal</div>
             </div>
           </div>
+          <div class="requestPanel" aria-label="Submit quote as reservation request">
+            <h3>Request This Trip</h3>
+            <div class="requestGrid">
+              <div class="requestField" id="quoteOutboundDateWrap">
+                <label for="quoteOutboundDate">Outbound Departure Date</label>
+                <input id="quoteOutboundDate" type="date" />
+              </div>
+              <div class="requestField" id="quoteOutboundTimeWrap">
+                <label for="quoteOutboundTime">Outbound Departure Time</label>
+                <select id="quoteOutboundTime" class="js-custom-select"></select>
+              </div>
+              <div class="requestField" id="quoteReturnDateWrap" {% if trip_type != "roundtrip" %}style="display:none;"{% endif %}>
+                <label for="quoteReturnDate">Return Departure Date</label>
+                <input id="quoteReturnDate" type="date" />
+              </div>
+              <div class="requestField" id="quoteReturnTimeWrap" {% if trip_type != "roundtrip" %}style="display:none;"{% endif %}>
+                <label for="quoteReturnTime">Return Departure Time</label>
+                <select id="quoteReturnTime" class="js-custom-select"></select>
+              </div>
+            </div>
+            <div class="requestMeta" id="quoteArrivalPreview"></div>
+            <div class="requestActions">
+              <button id="quoteReviewBtn" class="requestBtn" type="button">Review in Calendar</button>
+              <span class="micro">Arrival is auto-calculated from the quote’s typical block time.</span>
+            </div>
+            <div class="requestErr" id="quoteRequestErr"></div>
+          </div>
           <div id="summary" class="bigSummary" style="margin-top: 12px;">
             {{ summary_seed }}
             <div class="muted">
@@ -490,6 +586,13 @@
     const fuelPriceDelta = document.getElementById("fuelPriceDelta");
     const baseFuelPrice = Number(EST?.assumptions?.fuel_price_per_gal || 0) || Number(fuelPriceSlider?.value || 0) || 0;
     let activeFuelPrice = baseFuelPrice;
+    const quoteOutboundDate = document.getElementById("quoteOutboundDate");
+    const quoteOutboundTime = document.getElementById("quoteOutboundTime");
+    const quoteReturnDate = document.getElementById("quoteReturnDate");
+    const quoteReturnTime = document.getElementById("quoteReturnTime");
+    const quoteArrivalPreview = document.getElementById("quoteArrivalPreview");
+    const quoteReviewBtn = document.getElementById("quoteReviewBtn");
+    const quoteRequestErr = document.getElementById("quoteRequestErr");
 
     function setMode(mode){
       MODE = mode;
@@ -510,6 +613,72 @@
       const hh = Math.floor(totalMin / 60);
       const mm = totalMin % 60;
       return `${hh}:${String(mm).padStart(2,"0")}`;
+    }
+    function isoPartsLocal(dateObj){
+      const year = dateObj.getFullYear();
+      const month = String(dateObj.getMonth() + 1).padStart(2, "0");
+      const day = String(dateObj.getDate()).padStart(2, "0");
+      const hour = String(dateObj.getHours()).padStart(2, "0");
+      const minute = String(dateObj.getMinutes()).padStart(2, "0");
+      return { date: `${year}-${month}-${day}`, time: `${hour}:${minute}` };
+    }
+    function localDateTime(dateValue, timeValue){
+      return new Date(`${dateValue}T${timeValue}`);
+    }
+    function addMinutes(dateObj, minutes){
+      return new Date(dateObj.getTime() + (minutes * 60000));
+    }
+    function ceilToQuarterHour(dateObj){
+      const rounded = new Date(dateObj.getTime());
+      rounded.setSeconds(0, 0);
+      const remainder = rounded.getMinutes() % 15;
+      if(remainder !== 0){
+        rounded.setMinutes(rounded.getMinutes() + (15 - remainder));
+      }
+      return rounded;
+    }
+    function setQuoteError(message){
+      if(!quoteRequestErr) return;
+      quoteRequestErr.textContent = message || "";
+    }
+    function renderQuoteArrivalPreview(){
+      if(!quoteArrivalPreview) return;
+      const outboundDate = quoteOutboundDate?.value || "";
+      const outboundTime = quoteOutboundTime?.value || "";
+      if(!outboundDate || !outboundTime){
+        quoteArrivalPreview.textContent = "Select outbound departure date and time.";
+        return;
+      }
+      const outboundStart = localDateTime(outboundDate, outboundTime);
+      if(Number.isNaN(outboundStart.getTime())){
+        quoteArrivalPreview.textContent = "Outbound departure date/time is invalid.";
+        return;
+      }
+      const outboundMinutes = Number(EST?.legs?.[0]?.typical?.minutes || 0);
+      const outboundEnd = ceilToQuarterHour(addMinutes(outboundStart, outboundMinutes));
+      const outboundEndParts = isoPartsLocal(outboundEnd);
+      let text = `Outbound arrival: ${outboundEndParts.date} ${outboundEndParts.time}`;
+
+      if((EST?.inputs?.trip_type || "oneway") === "roundtrip"){
+        const returnDate = quoteReturnDate?.value || "";
+        const returnTime = quoteReturnTime?.value || "";
+        if(!returnDate || !returnTime){
+          text += " · Return departure time is required.";
+          quoteArrivalPreview.textContent = text;
+          return;
+        }
+        const returnStart = localDateTime(returnDate, returnTime);
+        if(Number.isNaN(returnStart.getTime())){
+          text += " · Return departure date/time is invalid.";
+          quoteArrivalPreview.textContent = text;
+          return;
+        }
+        const returnMinutes = Number(EST?.legs?.[1]?.typical?.minutes || 0);
+        const returnEnd = ceilToQuarterHour(addMinutes(returnStart, returnMinutes));
+        const returnEndParts = isoPartsLocal(returnEnd);
+        text += ` · Return arrival: ${returnEndParts.date} ${returnEndParts.time}`;
+      }
+      quoteArrivalPreview.textContent = text;
     }
     function adjustedFuelCost(costs){
       const gallons = Number(costs?.fuel_gal || 0);
@@ -874,9 +1043,129 @@
       renderWinds();
       renderCostBreakdown();
       renderMap();
+      renderQuoteArrivalPreview();
     }
 
     // Initialize
+    if(window.TBMReservationUI){
+      window.TBMReservationUI.initQuarterHourSelect(quoteOutboundTime, "Select time");
+      window.TBMReservationUI.initQuarterHourSelect(quoteReturnTime, "Select time");
+      window.TBMReservationUI.enhanceSelects(document);
+    }
+    if(window.TBMDateTimeBox){
+      window.TBMDateTimeBox.bindAll(document);
+    }
+    if(quoteOutboundDate){
+      quoteOutboundDate.value = EST?.inputs?.depart_date || "";
+      quoteOutboundDate.addEventListener("change", renderQuoteArrivalPreview);
+    }
+    if(quoteReturnDate){
+      quoteReturnDate.value = EST?.inputs?.return_date || "";
+      quoteReturnDate.addEventListener("change", renderQuoteArrivalPreview);
+    }
+    if(quoteOutboundTime){
+      quoteOutboundTime.value = "09:00";
+      quoteOutboundTime.addEventListener("change", renderQuoteArrivalPreview);
+    }
+    if(quoteReturnTime){
+      quoteReturnTime.value = "10:00";
+      quoteReturnTime.addEventListener("change", renderQuoteArrivalPreview);
+    }
+    quoteReviewBtn?.addEventListener("click", async () => {
+      setQuoteError("");
+      const outboundDate = quoteOutboundDate?.value || "";
+      const outboundTime = quoteOutboundTime?.value || "";
+      if(!outboundDate || !outboundTime){
+        setQuoteError("Outbound departure date/time is required.");
+        return;
+      }
+
+      const payload = {
+        estimate: {
+          inputs: EST?.inputs || {},
+          legs: (EST?.legs || []).map((leg) => ({
+            typical: { minutes: Number(leg?.typical?.minutes || 0) }
+          }))
+        },
+        outbound_departure_local: `${outboundDate}T${outboundTime}`
+      };
+
+      if((EST?.inputs?.trip_type || "oneway") === "roundtrip"){
+        const returnDate = quoteReturnDate?.value || "";
+        const returnTime = quoteReturnTime?.value || "";
+        if(!returnDate || !returnTime){
+          setQuoteError("Return departure date/time is required for roundtrip requests.");
+          return;
+        }
+        payload.return_departure_local = `${returnDate}T${returnTime}`;
+      }
+
+      quoteReviewBtn.disabled = true;
+      try {
+        const resp = await fetch("/api/planner/quote-drafts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if(!resp.ok){
+          setQuoteError(data.error || "Could not create reservation draft from this quote.");
+          return;
+        }
+        if(!data.token){
+          setQuoteError("Could not create reservation draft token.");
+          return;
+        }
+        window.location.href = `/calendar?draft=${encodeURIComponent(data.token)}`;
+      } catch (_err) {
+        setQuoteError("Network error while creating draft. Please try again.");
+      } finally {
+        quoteReviewBtn.disabled = false;
+      }
+    });
+
+    function enableClickAnywhereForRequestField(fieldId, controlId){
+      const field = document.getElementById(fieldId);
+      const control = document.getElementById(controlId);
+      if(!field || !control) return;
+      field.style.cursor = 'pointer';
+      field.addEventListener('click', (event) => {
+        const target = event.target;
+        if(target === control){
+          return;
+        }
+        if(target instanceof HTMLElement && target.closest('.tbmCustomSelect')){
+          return;
+        }
+        if(target instanceof HTMLElement && (target.tagName === 'OPTION')){
+          return;
+        }
+        control.focus();
+        if(control instanceof HTMLInputElement && typeof control.showPicker === 'function'){
+          try { control.showPicker(); } catch (_err) {}
+          return;
+        }
+        if(control instanceof HTMLSelectElement){
+          const triggerId = control.dataset.customSelectTriggerId;
+          if(triggerId){
+            const trigger = document.getElementById(triggerId);
+            if(trigger){
+              event.preventDefault();
+              event.stopPropagation();
+              trigger.click();
+              return;
+            }
+          }
+          try {
+            control.click();
+          } catch (_err) {}
+        }
+      });
+    }
+    enableClickAnywhereForRequestField('quoteOutboundDateWrap', 'quoteOutboundDate');
+    enableClickAnywhereForRequestField('quoteOutboundTimeWrap', 'quoteOutboundTime');
+    enableClickAnywhereForRequestField('quoteReturnDateWrap', 'quoteReturnDate');
+    enableClickAnywhereForRequestField('quoteReturnTimeWrap', 'quoteReturnTime');
     if (fuelPriceSlider) {
       fuelPriceSlider.addEventListener("input", () => {
         const parsed = Number(fuelPriceSlider.value);

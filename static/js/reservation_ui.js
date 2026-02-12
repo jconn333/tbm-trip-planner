@@ -85,11 +85,98 @@
     return { ok: true, data, response: resp };
   }
 
+  function enhanceSelect(selectEl){
+    if(!(selectEl instanceof HTMLSelectElement)) return null;
+    if(selectEl.dataset.customSelectEnhanced === '1') return null;
+    selectEl.dataset.customSelectEnhanced = '1';
+    selectEl.classList.add('tbmNativeSelect');
+
+    const container = document.createElement('div');
+    container.className = 'tbmCustomSelect';
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'tbmCustomSelectBtn';
+    const menu = document.createElement('div');
+    menu.className = 'tbmCustomSelectMenu';
+
+    function syncTrigger(){
+      const selectedOption = selectEl.options[selectEl.selectedIndex];
+      trigger.textContent = selectedOption ? selectedOption.textContent : 'Select option';
+      Array.from(menu.children).forEach((node) => {
+        if(!(node instanceof HTMLElement)) return;
+        node.classList.toggle('active', node.dataset.value === selectEl.value && node.dataset.value !== '');
+      });
+    }
+
+    function rebuildOptions(){
+      menu.innerHTML = '';
+      const options = Array.from(selectEl.options || []);
+      options.forEach((option) => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'tbmCustomSelectOption';
+        item.textContent = option.textContent || '';
+        item.dataset.value = option.value;
+        item.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          selectEl.value = option.value;
+          selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+          menu.classList.remove('open');
+        });
+        menu.appendChild(item);
+      });
+      syncTrigger();
+    }
+
+    trigger.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      menu.classList.toggle('open');
+    });
+
+    menu.addEventListener('click', (event) => event.stopPropagation());
+    menu.addEventListener('mousedown', (event) => event.stopPropagation());
+
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if(target instanceof Node && container.contains(target)) return;
+      menu.classList.remove('open');
+    });
+    document.addEventListener('keydown', (event) => {
+      if(event.key === 'Escape') menu.classList.remove('open');
+    });
+
+    selectEl.addEventListener('change', syncTrigger);
+
+    container.appendChild(trigger);
+    container.appendChild(menu);
+    selectEl.insertAdjacentElement('afterend', container);
+
+    const idSuffix = Math.random().toString(36).slice(2, 8);
+    const triggerId = `${selectEl.id || 'select'}CustomTrigger${idSuffix}`;
+    trigger.id = triggerId;
+    selectEl.dataset.customSelectTriggerId = triggerId;
+
+    const observer = new MutationObserver(() => rebuildOptions());
+    observer.observe(selectEl, { childList: true, subtree: true });
+
+    rebuildOptions();
+    return { trigger, menu };
+  }
+
+  function enhanceSelects(root = document){
+    if(!(root instanceof Document || root instanceof HTMLElement)) return;
+    root.querySelectorAll('select.js-custom-select').forEach((selectEl) => enhanceSelect(selectEl));
+  }
+
   window.TBMReservationUI = Object.assign({}, window.TBMReservationUI || {}, {
     splitIsoToDateTime,
     toQuarterHour,
     initQuarterHourSelect,
     setupAirportAutocomplete,
     apiAction,
+    enhanceSelect,
+    enhanceSelects,
   });
 })();

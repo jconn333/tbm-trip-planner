@@ -43,7 +43,7 @@
     <h3 style="margin-top:18px;">Reset Owner Password</h3>
     <div class="field">
       <label for="ownerSelect">Owner</label>
-      <select id="ownerSelect">
+      <select id="ownerSelect" class="js-custom-select">
         {% for owner in owners %}
           <option value="{{ owner.id }}">{{ owner.name }} ({{ owner.email }})</option>
         {% endfor %}
@@ -103,6 +103,7 @@
     ownerSelect.innerHTML = owners
       .map((owner) => `<option value="${owner.id}">${owner.name} (${owner.email})</option>`)
       .join('');
+    if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
   }
 
   pendingWrap.addEventListener('click', async (event) => {
@@ -162,6 +163,7 @@
     setMsg(resetMsg, 'Password reset.');
   });
 
+  if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
   loadPending();
 })();
 </script>

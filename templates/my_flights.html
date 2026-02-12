@@ -53,14 +53,14 @@
       <label>Departure Date / Time ({{ home_timezone }})</label>
       <div class="dtGrid dtBox" data-dt-box="modal-start" data-date-input="modalStartDate" data-time-input="modalStartTime">
         <input id="modalStartDate" type="date" />
-        <select id="modalStartTime"></select>
+        <select id="modalStartTime" class="js-custom-select"></select>
       </div>
     </div>
     <div class="field">
       <label>Arrival Date / Time ({{ home_timezone }})</label>
       <div class="dtGrid dtBox" data-dt-box="modal-end" data-date-input="modalEndDate" data-time-input="modalEndTime">
         <input id="modalEndDate" type="date" />
-        <select id="modalEndTime"></select>
+        <select id="modalEndTime" class="js-custom-select"></select>
       </div>
     </div>
     <div class="field">
@@ -289,6 +289,7 @@
   setupAirportAutocomplete(modalDest, modalDestSuggestions);
   initQuarterHourSelect(modalStartTime);
   initQuarterHourSelect(modalEndTime);
+  if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
   if(window.TBMDateTimeBox){ window.TBMDateTimeBox.bindAll(document); }
 
   loadMyFlights();

@@ -87,6 +87,24 @@ def _reservation_payload(start: datetime, end: datetime, traveling_user_id: int 
     return payload
 
 
+def _quote_estimate_payload(trip_type: str, depart_date: datetime, return_date: datetime | None = None):
+    payload = {
+        "inputs": {
+            "dep": "KCAK",
+            "dest": "KSRQ",
+            "trip_type": trip_type,
+            "depart_date": depart_date.date().isoformat(),
+            "return_date": return_date.date().isoformat() if return_date else None,
+        },
+        "legs": [
+            {"typical": {"minutes": 180}},
+        ],
+    }
+    if trip_type == "roundtrip":
+        payload["legs"].append({"typical": {"minutes": 175}})
+    return payload
+
+
 def test_parked_field_is_derived_from_destination(reservation_env):
     owner_client = tbm_app.app.test_client()
     _login(owner_client, "owner1@example.com", "ownerpass123")
@@ -388,3 +406,138 @@ def test_time_must_be_15_minute_increment(reservation_env):
     assert resp.status_code == 400
     body = resp.get_json()
     assert body["code"] == "invalid_time_increment"
+
+
+def test_quote_draft_create_and_get(reservation_env):
+    owner_client = tbm_app.app.test_client()
+    _login(owner_client, "owner1@example.com", "ownerpass123")
+
+    depart_dt = _to_quarter(datetime.now() + timedelta(days=2, hours=3))
+    estimate = _quote_estimate_payload("oneway", depart_dt)
+    create = owner_client.post(
+        "/api/planner/quote-drafts",
+        json={
+            "estimate": estimate,
+            "outbound_departure_local": depart_dt.strftime("%Y-%m-%dT%H:%M"),
+        },
+    )
+    assert create.status_code == 201
+    created = create.get_json()
+    assert created["token"]
+    assert created["draft_preview"]["trip_type"] == "oneway"
+    assert len(created["draft_preview"]["legs"]) == 1
+
+    token = created["token"]
+    fetched = owner_client.get(f"/api/planner/quote-drafts/{token}")
+    assert fetched.status_code == 200
+    draft = fetched.get_json()
+    assert draft["trip_type"] == "oneway"
+    assert draft["legs"][0]["dep_icao"] == "KCAK"
+    assert draft["legs"][0]["dest_icao"] == "KSRQ"
+
+
+def test_quote_draft_roundtrip_requires_return_departure(reservation_env):
+    owner_client = tbm_app.app.test_client()
+    _login(owner_client, "owner1@example.com", "ownerpass123")
+
+    depart_dt = _to_quarter(datetime.now() + timedelta(days=4, hours=2))
+    return_dt = depart_dt + timedelta(days=1)
+    estimate = _quote_estimate_payload("roundtrip", depart_dt, return_dt)
+    resp = owner_client.post(
+        "/api/planner/quote-drafts",
+        json={
+            "estimate": estimate,
+            "outbound_departure_local": depart_dt.strftime("%Y-%m-%dT%H:%M"),
+        },
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["field"] == "return_departure_local"
+
+
+def test_quote_draft_submit_consumes_and_cannot_reuse(reservation_env):
+    owner_client = tbm_app.app.test_client()
+    _login(owner_client, "owner1@example.com", "ownerpass123")
+
+    depart_dt = _to_quarter(datetime.now() + timedelta(days=5, hours=1))
+    estimate = _quote_estimate_payload("oneway", depart_dt)
+    create = owner_client.post(
+        "/api/planner/quote-drafts",
+        json={
+            "estimate": estimate,
+            "outbound_departure_local": depart_dt.strftime("%Y-%m-%dT%H:%M"),
+        },
+    )
+    assert create.status_code == 201
+    token = create.get_json()["token"]
+
+    submit = owner_client.post(f"/api/planner/quote-drafts/{token}/submit")
+    assert submit.status_code == 200
+    created = submit.get_json()["created"]
+    assert len(created) == 1
+    assert created[0]["status"] == "pending"
+
+    again = owner_client.post(f"/api/planner/quote-drafts/{token}/submit")
+    assert again.status_code == 409
+    assert again.get_json()["code"] == "draft_consumed"
+
+
+def test_quote_draft_token_is_user_scoped(reservation_env):
+    owner1_client = tbm_app.app.test_client()
+    owner2_client = tbm_app.app.test_client()
+    _login(owner1_client, "owner1@example.com", "ownerpass123")
+    _login(owner2_client, "owner2@example.com", "ownerpass123")
+
+    depart_dt = _to_quarter(datetime.now() + timedelta(days=8))
+    estimate = _quote_estimate_payload("oneway", depart_dt)
+    create = owner1_client.post(
+        "/api/planner/quote-drafts",
+        json={
+            "estimate": estimate,
+            "outbound_departure_local": depart_dt.strftime("%Y-%m-%dT%H:%M"),
+        },
+    )
+    assert create.status_code == 201
+    token = create.get_json()["token"]
+
+    blocked = owner2_client.get(f"/api/planner/quote-drafts/{token}")
+    assert blocked.status_code == 404
+
+
+def test_roundtrip_quote_submit_is_atomic_when_overlap_exists(reservation_env):
+    owner1_client = tbm_app.app.test_client()
+    owner2_client = tbm_app.app.test_client()
+    _login(owner1_client, "owner1@example.com", "ownerpass123")
+    _login(owner2_client, "owner2@example.com", "ownerpass123")
+
+    depart_dt = _to_quarter(datetime.now() + timedelta(days=6, hours=3))
+    return_depart_dt = depart_dt + timedelta(days=1, hours=2)
+    estimate = _quote_estimate_payload("roundtrip", depart_dt, return_depart_dt)
+    create = owner1_client.post(
+        "/api/planner/quote-drafts",
+        json={
+            "estimate": estimate,
+            "outbound_departure_local": depart_dt.strftime("%Y-%m-%dT%H:%M"),
+            "return_departure_local": return_depart_dt.strftime("%Y-%m-%dT%H:%M"),
+        },
+    )
+    assert create.status_code == 201
+    token = create.get_json()["token"]
+
+    blocking_start = return_depart_dt + timedelta(minutes=15)
+    blocking_end = blocking_start + timedelta(hours=1)
+    blocking = owner2_client.post(
+        "/api/reservation-requests",
+        json=_reservation_payload(blocking_start, blocking_end),
+    )
+    assert blocking.status_code == 201
+
+    submit = owner1_client.post(f"/api/planner/quote-drafts/{token}/submit")
+    assert submit.status_code == 409
+    assert submit.get_json()["code"] == "overlap_conflict"
+
+    with storage.get_conn(reservation_env["db_path"]) as conn:
+        owner1_rows = conn.execute(
+            "SELECT id FROM reservations WHERE requested_by_user_id = ?",
+            (reservation_env["owner1"],),
+        ).fetchall()
+    assert len(owner1_rows) == 0

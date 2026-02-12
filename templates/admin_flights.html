@@ -36,9 +36,9 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
   </div>
   <div class="panel">
     <div class="filters">
-      <div><label>Status</label><select id="status"><option value="all">All</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="denied">Denied</option><option value="canceled">Canceled</option></select></div>
-      <div><label>Owner</label><select id="owner"><option value="">Any</option></select></div>
-      <div><label>Requester</label><select id="requester"><option value="">Any</option></select></div>
+      <div><label>Status</label><select id="status" class="js-custom-select"><option value="all">All</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="denied">Denied</option><option value="canceled">Canceled</option></select></div>
+      <div><label>Owner</label><select id="owner" class="js-custom-select"><option value="">Any</option></select></div>
+      <div><label>Requester</label><select id="requester" class="js-custom-select"><option value="">Any</option></select></div>
       <div><label>From</label><input id="from" type="datetime-local" /></div>
       <div><label>To</label><input id="to" type="datetime-local" /></div>
       <div><label>Search</label><input id="q" type="text" placeholder="airport/owner" /></div>
@@ -69,14 +69,14 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
       <label>Departure Date / Time ({{ home_timezone }})</label>
       <div class="dtGrid dtBox" data-dt-box="edit-start" data-date-input="editStartDate" data-time-input="editStartTime">
         <input id="editStartDate" type="date" />
-        <select id="editStartTime"></select>
+        <select id="editStartTime" class="js-custom-select"></select>
       </div>
     </div>
     <div class="field">
       <label>Arrival Date / Time ({{ home_timezone }})</label>
       <div class="dtGrid dtBox" data-dt-box="edit-end" data-date-input="editEndDate" data-time-input="editEndTime">
         <input id="editEndDate" type="date" />
-        <select id="editEndTime"></select>
+        <select id="editEndTime" class="js-custom-select"></select>
       </div>
     </div>
     <div class="field">
@@ -213,6 +213,7 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
     const options = owners.map((o)=>`<option value="${o.id}">${o.name}</option>`).join('');
     el.owner.innerHTML = '<option value="">Any</option>' + options;
     el.requester.innerHTML = '<option value="">Any</option>' + options;
+    if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
   }
 
   function buildParams(){
@@ -398,6 +399,7 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
   setupAirportAutocomplete(el.editDest, el.editDestSuggestions);
   initQuarterHourSelect(el.editStartTime);
   initQuarterHourSelect(el.editEndTime);
+  if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
   if(window.TBMDateTimeBox){ window.TBMDateTimeBox.bindAll(document); }
 
   async function init(){
