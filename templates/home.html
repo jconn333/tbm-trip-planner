@@ -3,386 +3,130 @@
 {% block header_subtitle %}Use the form or just ask naturally.{% endblock %}
 {% block header_badge %}<div class="badge" title="App status"><span class="dot" aria-hidden="true"></span>Planner</div>{% endblock %}
 {% block page_styles %}
-    .grid{ display:grid; grid-template-columns: 1.05fr 0.95fr; gap:16px; }
-    @media (max-width:920px){ .grid{ grid-template-columns:1fr; } }
-
-    /* Cards */
-    .card{
-      background:linear-gradient(180deg, var(--panel), rgba(255,255,255,0.045));
-      border:1px solid var(--stroke);
-      border-radius:var(--radius);
-      box-shadow:var(--shadow);
-      overflow:hidden;
+    .intro {
+      margin-bottom: 28px;
+      max-width: 760px;
     }
-    .cardHeader{
-      padding:14px 16px 10px;
-      border-bottom:1px solid rgba(255,255,255,0.08);
-      background:rgba(0,0,0,0.10);
-    }
-    .cardHeader h2{ margin:0; font-size:15px; font-family: var(--display); letter-spacing:0.15px; }
-    .cardHeader p{ margin:6px 0 0; color:var(--muted); font-size:13px; line-height:1.35; }
-    .cardBody{ padding:17px; }
-
-    .error{
-      margin:0 0 12px;
-      padding:10px 12px;
-      border-radius:14px;
-      border:1px solid rgba(255,92,112,0.42);
-      background:rgba(255,92,112,0.10);
-      color:rgba(255,255,255,0.92);
-      font-size:13px;
-    }
-
-    /* Form */
-    form .row{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:12px;
-      margin-bottom:12px;
-    }
-    @media (max-width:560px){ form .row{ grid-template-columns:1fr; } }
-
-    .field label{ display:block; margin:0 0 6px; font-size:12px; color:var(--muted); font-weight: 600; }
-
-    .inputWrap{ position:relative; }
-
-    input:not([type="checkbox"]):not([type="radio"]),select,textarea{
-      width:100%;
-      padding:11px 12px;
-      border-radius:14px;
-      border:1px solid rgba(255,255,255,0.14);
-      background:linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
-      color:var(--text);
-      outline:none;
-      font-size:14px;
-      font-weight: 550;
-      transition: border-color .14s ease, box-shadow .14s ease, background .14s ease;
-    }
-    input:not([type="checkbox"]):not([type="radio"])::placeholder,textarea::placeholder{ color:rgba(255,255,255,0.38); }
-    input:not([type="checkbox"]):not([type="radio"]):focus,select:focus,textarea:focus{
-      border-color:rgba(110,168,254,0.55);
-      box-shadow:0 0 0 4px rgba(110,168,254,0.12);
-    }
-
-    /* Date picker polish */
-    input[type="date"]{ color-scheme:dark; cursor:pointer; }
-    .help{
-      margin-top:6px;
-      font-size:12px;
-      color:var(--muted2);
-      min-height:16px;
-    }
-    .help strong{ color:rgba(255,255,255,0.82); font-weight:650; }
-
-    .actions{
-      display:flex; align-items:center; justify-content:space-between;
-      gap:12px; margin-top:10px; flex-wrap:wrap;
-    }
-
-    .btn{
-      appearance:none;
-      border:1px solid rgba(255,255,255,0.14);
-      background:linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.05));
-      color:var(--text);
-      padding:10px 13px;
-      border-radius:14px;
-      cursor:pointer;
-      font-weight:650;
-      font-size:13.5px;
-      letter-spacing:0.15px;
-      transition: border-color .14s ease, background .14s ease, transform .12s ease;
-    }
-    .btn:hover{ background:rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.22); }
-    .btn:active{ transform: translateY(1px); }
-    .btn:disabled{ opacity:0.55; cursor:not-allowed; }
-
-    .btnPrimary{
-      border:1px solid rgba(110,168,254,0.62);
-      background:linear-gradient(135deg, rgba(110,168,254,0.92), rgba(124,242,194,0.50));
-      color:#0b1220;
-      box-shadow:0 10px 20px rgba(110,168,254,0.18);
-    }
-
-    .micro{ color:var(--muted2); font-size:12px; line-height:1.35; }
-
-    /* Autocomplete */
-    .suggestions{
-      position:absolute;
-      top:calc(100% + 8px);
-      left:0; right:0;
-      z-index:50;
-      background:rgba(15,22,36,0.98);
-      border:1px solid rgba(255,255,255,0.14);
-      border-radius:14px;
-      overflow:hidden;
-      box-shadow:0 16px 36px rgba(0,0,0,0.50);
-      display:none;
-      max-height:240px;
-      overflow-y:auto;
-    }
-    .suggestions button{
-      width:100%;
-      text-align:left;
-      border:0;
-      background:transparent;
-      color:var(--text);
-      padding:10px 12px;
-      cursor:pointer;
-      font-size:13px;
-      line-height:1.25;
-      border-bottom:1px solid rgba(255,255,255,0.07);
-    }
-    .suggestions button:hover{ background:rgba(110,168,254,0.10); }
-    .suggestions button:last-child{ border-bottom:0; }
-
-    .whatIf {
-      margin-top: 12px;
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 14px;
-      background: rgba(255,255,255,0.03);
-      padding: 10px 12px;
-    }
-    .whatIf summary {
-      cursor: pointer;
-      color: var(--muted);
-      font-size: 13px;
-      font-weight: 600;
-    }
-    .whatIf[open] summary {
-      margin-bottom: 10px;
-    }
-    .assumptionGrid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px 12px;
-    }
-    .sliderWrap {
-      margin-top: 8px;
-      display: grid;
-      gap: 4px;
-    }
-    .sliderRow {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .assumptionSlider {
-      width: 100%;
-      accent-color: var(--accent);
-    }
-    .sliderValue {
-      font-size: 11px;
-      color: var(--muted2);
-      min-width: 62px;
-      text-align: right;
-      font-family: var(--mono);
-    }
-    .nearbyLookup {
-      margin-top: 12px;
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 14px;
-      background: rgba(255,255,255,0.03);
-      padding: 10px 12px;
-    }
-    .nearbyHeader {
-      margin: 0 0 8px;
-      font-size: 13px;
-      color: var(--muted);
-    }
-    .nearbyRow {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 8px;
-    }
-    .nearbyFilters {
-      margin-top: 8px;
-      display: grid;
-      grid-template-columns: minmax(120px, 1.1fr) repeat(3, minmax(116px, 1fr));
-      gap: 8px;
-      align-items: stretch;
-    }
-    .nearbyFilters .field {
-      min-width: 0;
-    }
-    .nearbyFilters .field > label {
-      display: block;
-      margin: 0 0 4px;
-      font-size: 11px;
-      color: var(--muted2);
-    }
-    .nearbyToggle {
-      position: relative;
-      display: grid;
-      grid-template-columns: 1fr auto;
-      align-items: center;
-      gap: 10px;
-      min-height: 50px;
-      padding: 0 12px;
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 14px;
-      background:
-        radial-gradient(120% 120% at 8% 0%, rgba(110,168,254,0.15), rgba(110,168,254,0) 55%),
-        rgba(255,255,255,0.03);
-      color: rgba(233,240,255,0.92);
-      cursor: pointer;
-      user-select: none;
-      transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
-    }
-    .nearbyFilters > .nearbyToggle {
+    .intro h1 {
       margin: 0;
+      font-size: clamp(2rem, 3.6vw, 2.8rem);
+      line-height: 1.08;
+      letter-spacing: -0.01em;
     }
-    .nearbyToggle:hover {
-      border-color: rgba(110,168,254,0.50);
-      background:
-        radial-gradient(120% 120% at 8% 0%, rgba(110,168,254,0.20), rgba(110,168,254,0) 55%),
-        rgba(255,255,255,0.05);
-      box-shadow: 0 8px 16px rgba(4,10,20,0.22);
+    .intro p {
+      margin: 14px 0 0;
+      font-size: 1rem;
+      line-height: 1.6;
+      color: var(--color-muted);
     }
+    .sectionGapSm { margin-top: 10px; }
+    .sectionGapMd { margin-top: 16px; }
+    .contentStack { display:grid; gap:14px; }
+    .mutedTopNote { margin-top:8px; }
+    .grid { display:grid; grid-template-columns: 1.15fr 0.85fr; gap:18px; }
+    @media (max-width:920px){ .grid{ grid-template-columns:1fr; } }
+    .grid .cardHeader{ padding:20px 22px 14px; }
+    .grid .cardBody{ padding:22px; }
+    form .row{ display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:16px; }
+    @media (max-width:560px){ form .row{ grid-template-columns:1fr; } }
+    .inputWrap{ position:relative; }
+    .help{ margin-top:8px; min-height:16px; font-size:12.5px; }
+    .actions{ display:flex; align-items:center; justify-content:flex-start; gap:12px; flex-wrap:wrap; }
+    .plannerActions{ margin-top:2px; }
+    .plannerTip{ margin-top:8px; }
+    .suggestions{ position:absolute; top:calc(100% + 8px); left:0; right:0; z-index:50; display:none; max-height:240px; overflow-y:auto; }
+    .suggestions button{ width:100%; text-align:left; border:0; background:transparent; padding:10px 12px; cursor:pointer; font-size:13px; line-height:1.25; }
+    .whatIf { margin-top: 12px; padding: 14px; }
+    .whatIf summary { cursor: pointer; font-size: 13px; font-weight: 700; list-style: none; }
+    .whatIf summary::-webkit-details-marker { display:none; }
+    .whatIf summary::after { content:"Expand"; margin-left:8px; color:var(--color-muted); font-weight:600; font-size:12px; }
+    .whatIf[open] summary::after { content:"Collapse"; }
+    .whatIf[open] summary { margin-bottom: 10px; }
+    .whatIfLabel { margin-left:4px; }
+    .assumptionGrid { display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; }
+    .sliderWrap { margin-top:8px; display:grid; gap:4px; }
+    .sliderRow { display:flex; align-items:center; gap:8px; }
+    .assumptionSlider { width:100%; accent-color:#7bc44c; }
+    .sliderValue { min-width:62px; text-align:right; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .nearbyLookup { display:grid; gap:12px; }
+    .nearbyHeader { margin:0; font-size:13px; font-weight:700; }
+    .nearbyRow { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; }
+    .nearbyRow .btn { min-height:48px; padding-inline:20px; }
+    .nearbyFilters {
+      margin-top:2px;
+      display:grid;
+      grid-template-columns:minmax(132px,1.05fr) repeat(3, minmax(130px,1fr));
+      gap:12px;
+      align-items:stretch;
+    }
+    .nearbyFilters .field { margin:0; }
+    .nearbyFilters .field label { margin-bottom:8px; }
+    .nearbyFilters .field input { background: color-mix(in srgb, var(--color-surface-soft) 65%, white) !important; }
+    .nearbyToggle {
+      position:relative;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      min-height:58px;
+      padding:10px 14px;
+      border-radius:14px;
+      cursor:pointer;
+      user-select:none;
+      background: color-mix(in srgb, var(--color-surface-soft) 60%, white) !important;
+      box-shadow: none !important;
+    }
+    .nearbyToggle input[type="checkbox"] { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; appearance:none; -webkit-appearance:none; pointer-events:none; }
+    .toggleMark { width:38px; height:24px; border-radius:999px; transition:all .18s ease; position:relative; flex-shrink:0; }
+    .toggleMark::after { content:""; position:absolute; width:16px; height:16px; left:3px; top:3px; border-radius:50%; transition:transform .18s ease; }
+    .nearbyToggle input[type="checkbox"]:checked + .toggleMark::after { transform: translateX(14px); }
+    .toggleLabel { font-size:13px; font-weight:700; line-height:1.25; }
     .nearbyToggle:focus-within {
-      border-color: rgba(124,242,194,0.68);
-      box-shadow: 0 0 0 4px rgba(124,242,194,0.16);
+      outline: 2px solid color-mix(in srgb, var(--color-accent) 58%, white);
+      outline-offset: 2px;
     }
-    .nearbyToggle input[type="checkbox"] {
-      /* Visually hidden but still keyboard/screen-reader accessible */
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
-      appearance: none;
-      -webkit-appearance: none;
-      pointer-events: none;
+    .nearbyResults { margin-top:10px; display:grid; gap:8px; }
+    .nearbyItem { display:grid; grid-template-columns:1fr auto auto; gap:10px; align-items:center; border-radius:12px; padding:10px 12px; }
+    .nearbyMeta { line-height:1.45; }
+    .nearbyEmpty { padding:10px 12px; border:1px dashed var(--color-border); border-radius:12px; background: color-mix(in srgb, var(--color-surface-soft) 45%, white); }
+    .nearbyActions { display:inline-flex; align-items:center; gap:6px; justify-self:end; }
+    .nearbyAction { text-decoration:none; line-height:1; display:inline-flex; align-items:center; justify-content:center; min-height:30px; }
+    .nearbyDetails { grid-column:1 / -1; font-size:11px; line-height:1.35; margin-top:2px; }
+    @media (hover: hover) and (pointer: fine){
+      .nearbyToggle{
+        transition: background-color .16s ease, border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+      }
+      .nearbyToggle:hover{
+        background: color-mix(in srgb, var(--color-surface-soft) 45%, white);
+        border-color: color-mix(in srgb, var(--color-accent) 20%, var(--color-border));
+        box-shadow: 0 3px 10px rgba(22, 51, 0, 0.06);
+        transform: none;
+      }
+      .nearbyItem{
+        transition: background-color .16s ease, border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+      }
+      .nearbyItem:hover{
+        background: color-mix(in srgb, var(--color-surface-soft) 45%, white);
+        border-color: color-mix(in srgb, var(--color-accent) 20%, var(--color-border));
+        box-shadow: 0 3px 10px rgba(22, 51, 0, 0.06);
+        transform: none;
+      }
     }
-    .toggleMark {
-      width: 38px;
-      height: 24px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.34);
-      background: rgba(255,255,255,0.10);
-      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.20);
-      transition: all .18s ease;
-      grid-column: 2;
-      position: relative;
-    }
-    .toggleMark::after {
-      content: "";
-      position: absolute;
-      width: 16px;
-      height: 16px;
-      left: 3px;
-      top: 3px;
-      border-radius: 50%;
-      background: #f4f8ff;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.35);
-      transition: transform .18s ease;
-    }
-    .nearbyToggle input[type="checkbox"]:checked ~ .toggleLabel {
-      color: #f8fcff;
-    }
-    .nearbyToggle input[type="checkbox"]:checked + .toggleMark {
-      border-color: rgba(124,242,194,0.90);
-      background: linear-gradient(140deg, rgba(50,143,245,0.95), rgba(124,242,194,0.92));
-      box-shadow:
-        inset 0 0 0 1px rgba(255,255,255,0.22),
-        0 0 0 4px rgba(110,168,254,0.15);
-    }
-    .nearbyToggle input[type="checkbox"]:checked + .toggleMark::after {
-      transform: translateX(14px);
-    }
-    .nearbyToggle input[type="checkbox"]:focus-visible + .toggleMark {
-      box-shadow: 0 0 0 4px rgba(110,168,254,0.24);
-    }
-    .toggleLabel {
-      grid-column: 1;
-      font-size: 13px;
-      font-weight: 700;
-      letter-spacing: 0.1px;
-      color: inherit;
-      line-height: 1.2;
-    }
-    .nearbyResults {
-      margin-top: 8px;
-      display: grid;
-      gap: 6px;
-    }
-    .nearbyItem {
-      display: grid;
-      grid-template-columns: 1fr auto auto;
-      gap: 8px;
-      align-items: center;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.04);
-      border-radius: 12px;
-      padding: 8px 10px;
-    }
-    .nearbyDist {
-      font-size: 12px;
-      color: var(--muted2);
-      font-family: var(--mono);
-    }
-    .nearbyUse {
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(255,255,255,0.08);
-      color: var(--text);
-      border-radius: 10px;
-      padding: 6px 9px;
-      font-size: 12px;
-      cursor: pointer;
-    }
-    .nearbyActions {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      justify-self: end;
-    }
-    .nearbyAction {
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(255,255,255,0.08);
-      color: var(--text);
-      border-radius: 10px;
-      padding: 6px 9px;
-      font-size: 12px;
-      cursor: pointer;
-      text-decoration: none;
-      line-height: 1;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 30px;
-      transition: border-color .14s ease, background .14s ease;
-    }
-    .nearbyAction:hover {
-      border-color: rgba(110,168,254,0.45);
-      background: rgba(255,255,255,0.12);
-    }
-    .nearbyMore {
-      border-color: rgba(110,168,254,0.30);
-      background: rgba(110,168,254,0.10);
-      color: rgba(240,248,255,0.95);
-    }
-    .nearbyMeta {
-      margin-top: 6px;
-      font-size: 12px;
-      color: var(--muted2);
-    }
-    .nearbyDetails {
-      grid-column: 1 / -1;
-      font-size: 11px;
-      color: var(--muted2);
-      line-height: 1.3;
-    }
-    @media (max-width: 560px) {
-      .assumptionGrid { grid-template-columns: 1fr; }
-      .nearbyFilters { grid-template-columns: 1fr 1fr; }
-      .nearbyItem { grid-template-columns: 1fr; }
-      .nearbyActions { justify-self: start; }
+    @media (max-width:560px){
+      .assumptionGrid{ grid-template-columns:1fr; }
+      .nearbyRow{ grid-template-columns:1fr; }
+      .nearbyRow .btn{ width:100%; }
+      .nearbyFilters{ grid-template-columns:1fr; }
+      .nearbyItem{ grid-template-columns:1fr; }
+      .nearbyActions{ justify-self:start; }
     }
 {% endblock %}
 {% block content %}
+    <section class="intro" aria-label="Planner introduction">
+      <h1>Trip estimate planner</h1>
+      <p>Enter airports and dates to generate a practical estimate. Then use Calendar or My Flights when you are ready to submit or manage requests.</p>
+    </section>
+
     <div class="grid">
       <!-- LEFT: FORM -->
       <div class="card">
@@ -441,15 +185,15 @@
 
               <div class="field">
                 <label>&nbsp;</label>
-                <div class="actions">
+                <div class="actions plannerActions">
                   <button class="btn btnPrimary" type="submit">Calculate</button>
-                  <div class="micro">Tip: start typing a city to search airports.</div>
                 </div>
+                <p class="uiMeta plannerTip">Tip: start typing a city to search airports.</p>
               </div>
             </div>
 
-            <details class="whatIf">
-              <summary>What-if assumptions (optional)</summary>
+            <details class="whatIf uiSectionCompact">
+              <summary><span class="whatIfLabel">What-if assumptions (optional)</span></summary>
               <div class="assumptionGrid">
                 <div class="field">
                   <label for="tas_typical">Typical TAS (kt)</label>
@@ -510,7 +254,7 @@
         </div>
 
         <div class="cardBody">
-          <div class="nearbyLookup">
+          <div class="nearbyLookup uiStack">
             <p class="nearbyHeader">Find nearest airports by address</p>
             <div class="nearbyRow">
               <div class="inputWrap">
@@ -540,7 +284,7 @@
                 <span class="toggleLabel">Towered only</span>
               </label>
             </div>
-            <div id="addressLookupMeta" class="nearbyMeta"></div>
+            <div id="addressLookupMeta" class="nearbyMeta uiMeta"></div>
             <div id="addressLookupResults" class="nearbyResults"></div>
           </div>
         </div>
@@ -600,6 +344,8 @@
 
     const depEl  = document.getElementById("dep");
     const destEl = document.getElementById("dest");
+    const depSugEl = document.getElementById("depSug");
+    const destSugEl = document.getElementById("destSug");
     setupAirportAutocomplete(depEl, document.getElementById("depSug"));
     setupAirportAutocomplete(destEl, document.getElementById("destSug"));
     if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
@@ -666,7 +412,7 @@
     function renderNearestAirports(items) {
       addressLookupResults.innerHTML = "";
       if (!items || items.length === 0) {
-        addressLookupResults.innerHTML = '<div class="micro">No nearby airports found.</div>';
+        addressLookupResults.innerHTML = '<div class="nearbyEmpty uiMeta">No nearby airports found for this address and filter set.</div>';
         return;
       }
 
@@ -698,8 +444,14 @@
           if (!depEl.value) depEl.value = item.icao;
           else if (!destEl.value) destEl.value = item.icao;
           else destEl.value = item.icao;
-          depEl.dispatchEvent(new Event("input"));
-          destEl.dispatchEvent(new Event("input"));
+          if(depSugEl){
+            depSugEl.style.display = "none";
+            depSugEl.innerHTML = "";
+          }
+          if(destSugEl){
+            destSugEl.style.display = "none";
+            destSugEl.innerHTML = "";
+          }
         });
 
         const actions = document.createElement("div");

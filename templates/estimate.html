@@ -9,395 +9,151 @@
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 {% endblock %}
 {% block page_styles %}
-    .grid{
-      display:grid;
-      grid-template-columns: 1fr;
-      gap: 14px;
-    }
-
-    .card{
-      background: linear-gradient(180deg, var(--panel), rgba(255,255,255,0.045));
-      border: 1px solid var(--stroke);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      overflow: hidden;
-    }
-    .cardHeader{
-      padding: 14px 16px 12px;
-      border-bottom: 1px solid rgba(255,255,255,0.08);
-      background: rgba(0,0,0,0.10);
+    .sectionGapSm { margin-top: 10px; }
+    .sectionGapMd { margin-top: 18px; }
+    .contentStack { display:grid; gap:14px; }
+    .mutedTopNote { margin-top:8px; }
+    .grid { display:grid; grid-template-columns:1fr; gap:16px; }
+    .grid .cardHeader {
+      padding: 20px 22px 16px;
       display:flex;
       align-items:flex-start;
       justify-content:space-between;
-      gap: 12px;
+      gap:16px;
     }
-    .headerTools{
-      display:flex;
-      align-items:center;
-      gap: 10px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-    .tbmLogo{
+    .grid .cardHeader h2 { margin: 0; }
+    .grid .cardHeader p { margin: 10px 0 0; line-height: 1.5; }
+    .grid .cardBody { padding:22px; }
+    .headerTools { display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; }
+    .tbmLogo {
       display:inline-flex;
       align-items:center;
-      gap: 8px;
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(255,255,255,0.05);
-      border-radius: 999px;
-      padding: 6px 10px 6px 6px;
-      color: rgba(245,251,255,0.92);
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.2px;
-      white-space: nowrap;
-    }
-    .tbmLogoIcon{
-      width: 22px;
-      height: 22px;
-      border-radius: 999px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      background: linear-gradient(135deg, rgba(110,168,254,0.92), rgba(124,242,194,0.82));
-      color: #0b1220;
-      font-size: 10px;
-      font-weight: 900;
-    }
-    .cardHeader h2{ margin: 0; font-size: 15px; font-family: var(--display); letter-spacing: 0.15px; }
-    .cardHeader p{ margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.35; }
-    .cardBody{ padding: 17px; }
-
-    .row2{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-    @media (max-width: 560px){
-      .row2{ grid-template-columns: 1fr; }
-    }
-
-    .pillRow{ display:flex; flex-wrap: wrap; gap: 8px; align-items:center; }
-    .pill{
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(255,255,255,0.05);
-      color: var(--muted);
-      padding: 7px 10px;
-      border-radius: 999px;
-      font-size: 12.5px;
-      user-select: none;
-    }
-    .pill strong{ color: var(--text); font-weight: 650; }
-
-    .toggle{
-      display:inline-flex;
-      align-items:center;
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(255,255,255,0.05);
-      border-radius: 999px;
-      overflow:hidden;
-    }
-    .toggle button{
-      border:0;
-      background: transparent;
-      color: var(--muted);
-      padding: 8px 11px;
-      cursor:pointer;
-      font-size: 12.5px;
-      font-weight: 650;
-    }
-    .toggle button.active{
-      color: #0b1220;
-      background: linear-gradient(135deg, rgba(110,168,254,0.92), rgba(124,242,194,0.50));
-    }
-
-    .bigSummary{
-      padding: 13px 14px;
-      border-radius: 16px;
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.045);
-      line-height: 1.35;
-      font-size: 14px;
-    }
-    .bigSummary .muted{ color: var(--muted); font-size: 12.8px; margin-top: 6px; }
-    .fuelControl{
-      margin-top: 12px;
-      border-radius: 16px;
-      border: 1px solid rgba(110,168,254,0.34);
-      background:
-        radial-gradient(130% 140% at 0% 0%, rgba(110,168,254,0.18), rgba(110,168,254,0) 55%),
-        rgba(255,255,255,0.04);
-      padding: 12px;
-    }
-    .fuelTop{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-    .fuelTitle{
-      font-size: 13px;
-      font-weight: 750;
-      letter-spacing: 0.1px;
-    }
-    .fuelValue{
-      font-size: 22px;
-      font-weight: 820;
-      color: rgba(246,252,255,0.96);
-      letter-spacing: 0.2px;
-    }
-    .fuelDelta{
-      color: var(--muted);
-      font-size: 12px;
-      margin-top: 4px;
-    }
-    .fuelDelta.up{ color: rgba(255,208,150,0.95); }
-    .fuelDelta.down{ color: rgba(124,242,194,0.95); }
-    .fuelRange{
-      width: 100%;
-      margin-top: 10px;
-      accent-color: var(--accent2);
-      cursor: pointer;
-    }
-    .fuelTicks{
-      margin-top: 6px;
-      display:flex;
-      justify-content:space-between;
-      color: var(--muted2);
-      font-size: 11px;
-      font-family: var(--mono);
-    }
-
-    .kpis{
-      display:grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-      margin-top: 12px;
-    }
-    @media (max-width: 560px){
-      .kpis{ grid-template-columns: 1fr; }
-    }
-    .kpi{
-      border-radius: 16px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.04);
-      padding: 11px 12px;
-    }
-    .kpi .label{ color: var(--muted); font-size: 12px; }
-    .kpi .value{ font-size: 19px; font-weight: 800; margin-top: 4px; letter-spacing: 0.15px; }
-    .kpi .sub{ color: var(--muted2); font-size: 12px; margin-top: 4px; }
-    .requestPanel{
-      margin-top: 14px;
-      border-radius: 16px;
-      border: 1px solid rgba(124,242,194,0.34);
-      background:
-        radial-gradient(150% 140% at 0% 0%, rgba(124,242,194,0.12), rgba(124,242,194,0) 60%),
-        rgba(255,255,255,0.04);
-      padding: 12px;
-    }
-    .requestPanel h3{
-      margin: 0;
-      font-size: 14px;
-      letter-spacing: 0.1px;
-    }
-    .requestGrid{
-      margin-top: 10px;
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap: 8px;
-    }
-    @media (max-width: 560px){
-      .requestGrid{ grid-template-columns: 1fr; }
-    }
-    .requestField label{
-      display:block;
-      margin: 0 0 6px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .requestField input, .requestField select{
-      width:100%;
-      padding:10px 11px;
-      border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(7,12,22,0.62);
-      color: var(--text);
-      font-size: 13px;
-      position: relative;
-      z-index: 1;
-    }
-    .requestActions{
-      margin-top: 10px;
-      display:flex;
-      align-items:center;
-      gap:10px;
-      flex-wrap:wrap;
-    }
-    .requestBtn{
-      border:1px solid rgba(124,242,194,0.52);
-      background: linear-gradient(135deg, rgba(110,168,254,0.75), rgba(124,242,194,0.52));
-      color:#0b1220;
+      gap:8px;
+      border:1px solid var(--color-border);
+      background: var(--color-surface-soft);
       border-radius:999px;
-      padding:9px 13px;
-      font-size:12.5px;
-      font-weight: 760;
-      cursor:pointer;
+      padding:5px 10px 5px 6px;
+      font-size:12px;
+      font-weight:700;
     }
-    .requestMeta{
-      margin-top:8px;
-      color:var(--muted2);
-      font-size: 12px;
-      line-height: 1.35;
-    }
-    .requestErr{
-      color: rgba(255,188,198,0.96);
-      font-size: 12px;
-      min-height: 16px;
-      margin-top: 6px;
-    }
-
-    /* Map */
-    #map{
-      height: 340px;
-      border-radius: 16px;
-      overflow:hidden;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.03);
-    }
-
-    /* Winds viz */
-    .windBox{
-      border-radius: 16px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.04);
-      padding: 12px;
-    }
-    .windTop{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-    .windVal{
-      font-size: 18px;
-      font-weight: 750;
-      letter-spacing: 0.2px;
-    }
-    .windVal small{ font-weight: 650; font-size: 12.5px; color: var(--muted); margin-left: 6px; }
-    .windBar{
-      margin-top: 10px;
-      height: 12px;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.10);
-      position: relative;
-      overflow:hidden;
-    }
-    .windCenter{
-      position:absolute; left: 50%; top: 0; bottom: 0;
-      width: 2px;
-      background: rgba(255,255,255,0.25);
-    }
-    .windFill{
-      position:absolute; top: 0; bottom: 0;
-      width: 0%;
-      background: rgba(255,255,255,0.20);
-    }
-    .windFill.tail{ background: rgba(124,242,194,0.35); }
-    .windFill.head{ background: rgba(255,92,112,0.28); }
-
-    .windMeta{
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 12.5px;
-      line-height: 1.35;
-      white-space: pre-wrap;
-    }
-
-    /* Cost breakdown */
-    .costGrid{
-      display:grid;
-      grid-template-columns: 0.95fr 1.05fr;
-      gap: 12px;
-      align-items:center;
-    }
-    @media (max-width: 560px){
-      .costGrid{ grid-template-columns: 1fr; }
-    }
-
-    .donutWrap{
+    .tbmLogoIcon {
+      width:22px;
+      height:22px;
+      border-radius:999px;
       display:flex;
       align-items:center;
       justify-content:center;
-      border-radius: 16px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.04);
-      padding: 10px;
-      min-height: 210px;
+      background: var(--color-accent);
+      color: var(--color-text);
+      font-size:10px;
+      font-weight:900;
     }
-    .legend{
-      border-radius: 16px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.04);
-      padding: 12px;
-    }
-    .legendRow{
-      display:flex;
+    .row2, .requestGrid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .kpis { display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; margin-top:18px; align-items:stretch; }
+    .requestField.is-hidden { display:none; }
+    .kpi { padding:18px 18px 17px !important; }
+    .kpi .label { font-size:12px; font-weight:650; margin-bottom:8px; line-height:1.35; }
+    .kpi .value { font-size:22px; font-weight:820; margin-top:0; line-height:1.06; letter-spacing:0; }
+    .kpi .sub { font-size:12px; margin-top:12px; line-height:1.5; color:var(--muted); }
+    .toggle {
+      display:inline-flex;
       align-items:center;
-      justify-content:space-between;
-      gap: 10px;
-      padding: 9px 0;
-      border-bottom: 1px solid rgba(255,255,255,0.07);
-      font-size: 13.5px;
-    }
-    .legendRow:last-child{ border-bottom: 0; }
-    .legendLeft{ display:flex; align-items:center; gap: 10px; color: var(--muted); }
-    .swatch{ width: 12px; height: 12px; border-radius: 4px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.14); }
-    .legendVal{ font-weight: 700; }
-
-    .micro{ color: var(--muted2); font-size: 12px; line-height: 1.35; }
-
-    /* Legs */
-    .legs{
-      margin-top: 12px;
-      border-radius: 16px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.04);
+      border:1px solid var(--color-border);
+      background:var(--color-surface-soft);
+      border-radius:999px;
       overflow:hidden;
     }
-    .legRow{
-      padding: 12px;
-      border-bottom: 1px solid rgba(255,255,255,0.07);
+    .toggle button {
+      border:0;
+      background:transparent;
+      padding:8px 11px;
+      font-size:12.5px;
+      font-weight:650;
+      cursor:pointer;
     }
-    .legRow:last-child{ border-bottom: 0; }
-    .legTop{
+    .toggle button.active {
+      background: var(--color-accent);
+      color: var(--color-text);
+    }
+    .bigSummary { line-height:1.45; font-size:14px; padding:14px 16px; }
+    .bigSummary .muted { margin-top:8px; font-size:12px; line-height:1.4; }
+    .fuelControl { margin-top:14px; padding:14px; }
+    .fuelTop { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .fuelTitle { font-size:13px; font-weight:700; }
+    .fuelValue { font-size:22px; font-weight:800; }
+    .fuelDelta { font-size:12px; margin-top:4px; }
+    .fuelRange { width:100%; margin-top:10px; accent-color:#7bc44c; cursor:pointer; }
+    .fuelTicks { margin-top:8px; display:flex; justify-content:space-between; font-size:11px; font-family:var(--mono); }
+    .requestPanel { margin-top:16px; padding:16px; }
+    .requestPanel h3 { margin:0 0 2px; font-size:14px; }
+    .requestGrid { margin-top:10px; }
+    .requestActions { margin-top:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    .requestMeta, .requestErr { margin-top:10px; font-size:12.5px; min-height:16px; line-height:1.5; }
+    .pillRow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .pill { padding:7px 10px; font-size:12px; border-radius:999px; }
+    #map { height:320px; border-radius:14px; overflow:hidden; border:1px solid var(--color-border); }
+    .windBox { padding:14px; }
+    .windTop { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .windVal { font-size:18px; font-weight:750; }
+    .windVal small { font-size:12px; margin-left:6px; }
+    .windBar { margin-top:10px; height:12px; border-radius:999px; background:var(--color-surface-soft); border:1px solid var(--color-border); position:relative; overflow:hidden; }
+    .windCenter { position:absolute; left:50%; top:0; bottom:0; width:2px; background:#c9d4c9; }
+    .windFill { position:absolute; top:0; bottom:0; width:0%; background:#b7c5b8; }
+    .windFill.tail { background:#8ccf64; }
+    .windFill.head { background:#d89b9b; }
+    .windMeta { margin-top:12px; font-size:12px; line-height:1.4; white-space:pre-wrap; }
+    .costGrid { display:grid; grid-template-columns:0.95fr 1.05fr; gap:12px; align-items:center; }
+    .donutWrap { display:flex; align-items:center; justify-content:center; min-height:210px; padding:10px; }
+    .legend { padding:14px; }
+    .legendRow { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--color-border); font-size:13px; }
+    .legendRow:last-child { border-bottom:0; }
+    .legendLeft { display:flex; align-items:center; gap:10px; }
+    .swatch { width:12px; height:12px; border-radius:4px; background:#dfe6df; border:1px solid #d0d8d0; }
+    .legendVal { font-weight:700; }
+    .legs { margin-top:14px; border:1px solid var(--color-border); border-radius:16px; overflow:hidden; }
+    .legRow { padding:14px; border-bottom:1px solid var(--color-border); }
+    .legRow:last-child { border-bottom:0; }
+    .legTop { display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .legTitle { font-weight:800; }
+    .legMeta { font-size:12px; margin-top:8px; line-height:1.4; }
+    .legNums { display:flex; gap:10px; flex-wrap:wrap; }
+    .tag { font-size:12px; border-radius:999px; padding:6px 10px; }
+    .summaryBlock { margin-top:14px; }
+    .sectionBlock { margin-top:18px; }
+    .sectionLabel { margin:0 0 10px; font-size:12.5px; font-weight:700; letter-spacing:0.01em; color:var(--muted); }
+    .mapNote { margin-top:10px; }
+    .costHeading { margin-bottom:10px; }
+    .legendNote { margin-top:10px; }
+    .planeIconBadge {
+      width:28px;
+      height:28px;
+      border-radius:999px;
       display:flex;
-      align-items:baseline;
-      justify-content:space-between;
-      gap: 10px;
-      flex-wrap: wrap;
+      align-items:center;
+      justify-content:center;
+      border:1px solid var(--color-border);
+      background: color-mix(in srgb, var(--color-accent) 20%, white);
+      box-shadow: 0 4px 10px rgba(22, 51, 0, 0.16);
     }
-    .legTitle{ font-weight: 800; letter-spacing: 0.2px; }
-    .legMeta{ color: var(--muted); font-size: 12.5px; margin-top: 6px; line-height: 1.35; }
-    .legNums{ display:flex; gap: 12px; flex-wrap: wrap; }
-    .tag{
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.05);
-      color: var(--muted);
-      padding: 6px 10px;
-      border-radius: 999px;
-      font-size: 12.5px;
+    .planeIconGlyph {
+      width:0;
+      height:0;
+      border-left:8px solid color-mix(in srgb, var(--color-text) 80%, white);
+      border-top:6px solid transparent;
+      border-bottom:6px solid transparent;
+      transform: translateX(1px);
     }
-    .tag strong{ color: var(--text); font-weight: 750; }
-
-    a.back{
-      color: rgba(255,255,255,0.88);
-      text-decoration: none;
-      border-bottom: 1px solid rgba(255,255,255,0.22);
+    a.back { color:inherit; text-decoration:underline; text-underline-offset:2px; }
+    a.back:hover { opacity:0.8; }
+    @media (max-width: 760px){
+      .row2, .requestGrid, .costGrid { grid-template-columns:1fr; }
+      .kpis { grid-template-columns:1fr; }
+      #map { height:280px; }
     }
-    a.back:hover{ border-bottom-color: rgba(255,255,255,0.5); }
+    @media (min-width: 1400px){
+      .kpis { gap:18px; }
+      .kpi { padding:20px 22px 19px !important; }
+    }
 {% endblock %}
 {% block content %}
     <div class="grid">
@@ -441,7 +197,7 @@
               <div class="sub" id="kpiFuelSub">{{ fuel_burn_gph }} gph · ${{ fuel_price }}/gal</div>
             </div>
           </div>
-          <div class="requestPanel" aria-label="Submit quote as reservation request">
+          <div class="requestPanel uiStack" aria-label="Submit quote as reservation request">
             <h3>Request This Trip</h3>
             <div class="requestGrid">
               <div class="requestField" id="quoteOutboundDateWrap">
@@ -452,11 +208,11 @@
                 <label for="quoteOutboundTime">Outbound Departure Time</label>
                 <select id="quoteOutboundTime" class="js-custom-select"></select>
               </div>
-              <div class="requestField" id="quoteReturnDateWrap" {% if trip_type != "roundtrip" %}style="display:none;"{% endif %}>
+              <div class="requestField {% if trip_type != "roundtrip" %}is-hidden{% endif %}" id="quoteReturnDateWrap">
                 <label for="quoteReturnDate">Return Departure Date</label>
                 <input id="quoteReturnDate" type="date" />
               </div>
-              <div class="requestField" id="quoteReturnTimeWrap" {% if trip_type != "roundtrip" %}style="display:none;"{% endif %}>
+              <div class="requestField {% if trip_type != "roundtrip" %}is-hidden{% endif %}" id="quoteReturnTimeWrap">
                 <label for="quoteReturnTime">Return Departure Time</label>
                 <select id="quoteReturnTime" class="js-custom-select"></select>
               </div>
@@ -464,17 +220,16 @@
             <div class="requestMeta" id="quoteArrivalPreview"></div>
             <div class="requestActions">
               <button id="quoteReviewBtn" class="requestBtn" type="button">Review in Calendar</button>
-              <span class="micro">Arrival is auto-calculated from the quote’s typical block time.</span>
             </div>
             <div class="requestErr" id="quoteRequestErr"></div>
           </div>
-          <div id="summary" class="bigSummary" style="margin-top: 12px;">
+          <div id="summary" class="bigSummary summaryBlock uiSectionCompact">
             {{ summary_seed }}
             <div class="muted">
               Tip: Conservative mostly means a bit slower (routing + overhead), so it burns more fuel and time.
             </div>
           </div>
-          <div class="fuelControl" aria-label="Fuel price control">
+          <div class="fuelControl uiSectionCompact" aria-label="Fuel price control">
             <div class="fuelTop">
               <div>
                 <div class="fuelTitle">Fuel Price</div>
@@ -489,25 +244,26 @@
             </div>
           </div>
 
-          <div style="margin-top: 14px;">
+          <div class="sectionBlock uiSection">
             <div class="pillRow">
               <div class="pill"><strong>Routing</strong> Typical +{{ routing_typ_pct }}% · Conservative +{{ routing_con_pct }}%</div>
               <div class="pill"><strong>Overhead</strong> Typical {{ overhead_typ_min }} min · Conservative {{ overhead_con_min }} min</div>
             </div>
           </div>
 
-          <div style="margin-top: 14px;">
+          <div class="sectionBlock uiSection">
+            <div class="sectionLabel">Route map</div>
             <div id="map" aria-label="Route map"></div>
-            <div class="micro" style="margin-top: 8px;">
+            <div class="micro mapNote">
               Animated line is for visual intuition only — your real route may vary.
             </div>
           </div>
 
-          <div style="margin-top: 14px;" class="row2">
+          <div class="row2 sectionBlock uiSection">
             <div class="windBox">
               <div class="windTop">
                 <div>
-                  <div class="micro">Outbound winds (FL270 head/tail component)</div>
+                  <div class="sectionLabel">Outbound winds (FL270 head/tail component)</div>
                   <div class="windVal" id="windValue">— <small>kt</small></div>
                 </div>
                 <div class="pill" id="windLabel">—</div>
@@ -520,7 +276,7 @@
             </div>
 
             <div>
-              <div class="micro" style="margin-bottom: 8px;">Cost breakdown (interactive)</div>
+              <div class="sectionLabel costHeading">Cost breakdown (interactive)</div>
               <div class="costGrid">
                 <div class="donutWrap">
                   <svg id="donut" width="190" height="190" viewBox="0 0 190 190" aria-label="Donut chart"></svg>
@@ -542,7 +298,7 @@
                     <div class="legendLeft"><span class="swatch" id="swFuel"></span> Fuel</div>
                     <div class="legendVal" id="valFuel">—</div>
                   </div>
-                  <div class="micro" style="margin-top: 8px;">
+                  <div class="micro legendNote">
                     Click a slice to “spotlight” it.
                   </div>
                 </div>
@@ -643,15 +399,16 @@
     }
     function renderQuoteArrivalPreview(){
       if(!quoteArrivalPreview) return;
+      const helper = "Arrival is auto-calculated from the quote's typical block time.";
       const outboundDate = quoteOutboundDate?.value || "";
       const outboundTime = quoteOutboundTime?.value || "";
       if(!outboundDate || !outboundTime){
-        quoteArrivalPreview.textContent = "Select outbound departure date and time.";
+        quoteArrivalPreview.textContent = `Select outbound departure date and time. ${helper}`;
         return;
       }
       const outboundStart = localDateTime(outboundDate, outboundTime);
       if(Number.isNaN(outboundStart.getTime())){
-        quoteArrivalPreview.textContent = "Outbound departure date/time is invalid.";
+        quoteArrivalPreview.textContent = `Outbound departure date/time is invalid. ${helper}`;
         return;
       }
       const outboundMinutes = Number(EST?.legs?.[0]?.typical?.minutes || 0);
@@ -664,12 +421,14 @@
         const returnTime = quoteReturnTime?.value || "";
         if(!returnDate || !returnTime){
           text += " · Return departure time is required.";
+          text += ` · ${helper}`;
           quoteArrivalPreview.textContent = text;
           return;
         }
         const returnStart = localDateTime(returnDate, returnTime);
         if(Number.isNaN(returnStart.getTime())){
           text += " · Return departure date/time is invalid.";
+          text += ` · ${helper}`;
           quoteArrivalPreview.textContent = text;
           return;
         }
@@ -678,7 +437,7 @@
         const returnEndParts = isoPartsLocal(returnEnd);
         text += ` · Return arrival: ${returnEndParts.date} ${returnEndParts.time}`;
       }
-      quoteArrivalPreview.textContent = text;
+      quoteArrivalPreview.textContent = `${text} · ${helper}`;
     }
     function adjustedFuelCost(costs){
       const gallons = Number(costs?.fuel_gal || 0);
@@ -795,23 +554,8 @@
 
       // Animated “plane” marker along the polyline
       const planeIcon = L.divIcon({
-        className: "",
-        html: `<div style="
-          width:28px;height:28px;border-radius:999px;
-          display:flex;align-items:center;justify-content:center;
-          border:1px solid rgba(255,255,255,0.20);
-          background: rgba(110,168,254,0.18);
-          box-shadow: 0 10px 22px rgba(0,0,0,0.35);
-          backdrop-filter: blur(6px);
-        ">
-          <div style="
-            width:0;height:0;
-            border-left:8px solid rgba(255,255,255,0.92);
-            border-top:6px solid transparent;
-            border-bottom:6px solid transparent;
-            transform: translateX(1px);
-          "></div>
-        </div>`,
+        className: "planeIconWrap",
+        html: `<div class="planeIconBadge"><div class="planeIconGlyph"></div></div>`,
         iconSize: [28,28],
         iconAnchor: [14,14]
       });
@@ -1064,11 +808,11 @@
       quoteReturnDate.addEventListener("change", renderQuoteArrivalPreview);
     }
     if(quoteOutboundTime){
-      quoteOutboundTime.value = "09:00";
+      quoteOutboundTime.value = "06:00";
       quoteOutboundTime.addEventListener("change", renderQuoteArrivalPreview);
     }
     if(quoteReturnTime){
-      quoteReturnTime.value = "10:00";
+      quoteReturnTime.value = "06:00";
       quoteReturnTime.addEventListener("change", renderQuoteArrivalPreview);
     }
     quoteReviewBtn?.addEventListener("click", async () => {

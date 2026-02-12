@@ -5,41 +5,58 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css">
 {% endblock %}
 {% block page_styles %}
-.layout{display:grid;grid-template-columns:1.2fr .8fr;gap:12px}
-@media (max-width:980px){.layout{grid-template-columns:1fr}}
-.panel{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);border-radius:16px;padding:12px}
-.panel h3{margin:0 0 10px;font-size:15px}
-#calendar{min-height:620px}
-.field{margin-bottom:10px;position:relative}
-.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
-.field input,.field select,.field textarea{width:100%;border:1px solid rgba(255,255,255,.18);background:rgba(8,14,28,.5);color:var(--text);border-radius:10px;padding:9px 10px}
-.field textarea{min-height:76px;resize:vertical}
-.dtGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.dtBox{border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:8px;cursor:text}
-.dtBox:focus-within{border-color:rgba(124,242,194,.45)}
-.airportSuggestions{position:absolute;left:0;right:0;top:100%;margin-top:4px;border:1px solid rgba(255,255,255,.16);border-radius:10px;background:rgba(8,14,28,.98);backdrop-filter:blur(4px);z-index:25;overflow:hidden;display:none}
-.airportSuggestions.open{display:block}
-.airportOption{width:100%;border:0;border-top:1px solid rgba(255,255,255,.08);background:transparent;color:var(--text);text-align:left;padding:8px 10px;cursor:pointer;font-size:12px}
-.airportOption:first-child{border-top:0}
-.airportOption:hover{background:rgba(255,255,255,.08)}
-.actions{display:flex;gap:8px;flex-wrap:wrap}
-.btn{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--text);border-radius:999px;padding:8px 12px;cursor:pointer}
-.btn.primary{border-color:rgba(124,242,194,.45);background:linear-gradient(135deg, rgba(110,168,254,.36), rgba(124,242,194,.28))}
-.btn.danger{border-color:rgba(255,92,112,.55);background:rgba(255,92,112,.2)}
-.btn.small{padding:6px 10px;font-size:11px}
-.item{border-top:1px solid rgba(255,255,255,.08);padding:8px 0;font-size:13px}
-.item:first-child{border-top:0}
-.kv{color:var(--muted);font-size:12px;margin-top:4px}
-.inline{display:flex;align-items:center;gap:8px;margin-bottom:10px;color:var(--muted);font-size:12px}
-.msg{margin-top:8px;font-size:12px;color:var(--muted);min-height:16px}
-.pendingItemHead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
-.draftPanel{margin-bottom:12px;border:1px solid rgba(124,242,194,.35);background:rgba(124,242,194,.08);border-radius:12px;padding:10px}
-.draftPanel h4{margin:0 0 8px;font-size:13px}
-.draftLeg{border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:8px;margin-top:8px;background:rgba(10,18,32,.48)}
-.draftLeg:first-of-type{margin-top:0}
-.draftGrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-@media (max-width:980px){.draftGrid{grid-template-columns:1fr}}
-.draftHint{font-size:11px;color:var(--muted);margin-top:6px}
+.sectionGapSm { margin-top: 10px; }
+.sectionGapMd { margin-top: 16px; }
+.contentStack { display:grid; gap:12px; }
+.mutedTopNote { margin-top:8px; }
+.layout { display:grid; grid-template-columns:1.25fr 0.85fr; gap:16px; }
+@media (max-width:980px){ .layout{ grid-template-columns:1fr; } }
+.panel { padding:16px; }
+.panel h3 { margin:0 0 12px; font-size:15.5px; }
+.panel h3 + .uiMeta { margin-top:-4px; margin-bottom:10px; }
+#calendar { min-height:620px; }
+.field { margin-bottom:12px; position:relative; }
+.field textarea { min-height:76px; resize:vertical; }
+.dtGrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.dtBox { border:1px solid var(--color-border); border-radius:12px; padding:10px; cursor:text; background:var(--color-surface-soft); }
+.airportSuggestions { position:absolute; left:0; right:0; top:100%; margin-top:4px; z-index:25; overflow:hidden; display:none; }
+.airportSuggestions.open { display:block; }
+.airportOption { width:100%; border:0; text-align:left; padding:8px 10px; cursor:pointer; font-size:12px; }
+.airportOption:first-child { border-top:0; }
+.actions { display:flex; gap:10px; flex-wrap:wrap; }
+.btn.small { padding:6px 10px; font-size:11px; }
+.item { padding:10px 0; font-size:13px; }
+.item:first-child { border-top:0; }
+.kv, .msg, .inline, .draftHint { font-size:12.5px; }
+.kv.mb8 { margin-bottom:8px; }
+.inline { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+.msg { margin-top:10px; min-height:16px; }
+.sectionTitle { margin-top:18px; }
+.pendingItemHead { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+.is-hidden { display:none; }
+.quoteContext { margin-bottom:14px; }
+.draftPanel { margin-bottom:14px; padding:12px; background: color-mix(in srgb, var(--color-surface-soft) 52%, white) !important; box-shadow:none !important; }
+.draftPanel h4 { margin:0 0 10px; font-size:13px; }
+.draftLeg { padding:10px; margin-top:10px; }
+.draftLeg:first-of-type { margin-top:0; }
+.draftGrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.draftGridSpaced { margin-top:8px; }
+.draftNotes {
+  margin-top:6px;
+  width:100%;
+  min-height:58px;
+  padding:8px 10px;
+  border:1px solid var(--color-border);
+  background:var(--color-surface);
+  color:var(--color-text);
+  border-radius:10px;
+}
+.actionsTop6 { margin-top:8px; }
+.actionsTop10 { margin-top:12px; }
+.formBlock { padding-top:12px; border-top:1px solid var(--color-border); }
+.quietSection { margin-top:18px; padding-top:14px; border-top:1px solid var(--color-border); }
+.quietSection .sectionTitle { margin-top:0; margin-bottom:10px; }
+@media (max-width:980px){ .draftGrid, .dtGrid { grid-template-columns:1fr; } }
 {% endblock %}
 {% block content %}
 <section class="layout">
@@ -53,56 +70,64 @@
 
   <div class="panel">
     <h3>Request / Edit Reservation</h3>
-    <div class="kv" style="margin-bottom:8px;">Need a full list view? Open <a href="/my-flights">My Flights</a>.</div>
-    <div id="quoteDraftPanel"></div>
+    <p class="uiMeta">Need a full list view? Open <a href="/my-flights">My Flights</a>.</p>
+    <div id="quoteDraftPanel" class="quoteContext uiSectionCompact"></div>
 
-    <div class="field">
-      <label>Departure Date / Time ({{ home_timezone }})</label>
-      <div class="dtGrid dtBox" data-dt-box="start" data-date-input="startDate" data-time-input="startTime">
-        <input id="startDate" type="date" required />
-        <select id="startTime" class="js-custom-select" required></select>
+    <div class="formBlock uiStack">
+      <div class="field">
+        <label>Departure Date / Time ({{ home_timezone }})</label>
+        <div class="dtGrid dtBox" data-dt-box="start" data-date-input="startDate" data-time-input="startTime">
+          <input id="startDate" type="date" required />
+          <select id="startTime" class="js-custom-select" required></select>
+        </div>
       </div>
-    </div>
-    <div class="field">
-      <label>Arrival Date / Time ({{ home_timezone }})</label>
-      <div class="dtGrid dtBox" data-dt-box="end" data-date-input="endDate" data-time-input="endTime">
-        <input id="endDate" type="date" required />
-        <select id="endTime" class="js-custom-select" required></select>
+      <div class="field">
+        <label>Arrival Date / Time ({{ home_timezone }})</label>
+        <div class="dtGrid dtBox" data-dt-box="end" data-date-input="endDate" data-time-input="endTime">
+          <input id="endDate" type="date" required />
+          <select id="endTime" class="js-custom-select" required></select>
+        </div>
       </div>
+      <div class="field" id="depIcaoField">
+        <label for="depIcao">Departure Airport</label>
+        <input id="depIcao" type="text" maxlength="4" autocomplete="off" required />
+        <div id="depIcaoSuggestions" class="airportSuggestions"></div>
+      </div>
+      <div class="field" id="destIcaoField">
+        <label for="destIcao">Destination Airport</label>
+        <input id="destIcao" type="text" maxlength="4" autocomplete="off" required />
+        <div id="destIcaoSuggestions" class="airportSuggestions"></div>
+      </div>
+      <div class="field">
+        <label for="travelingOwner">Traveling Owner</label>
+        <select id="travelingOwner" class="js-custom-select"></select>
+      </div>
+      <div class="field">
+        <label for="reservationNotes">Notes</label>
+        <textarea id="reservationNotes"></textarea>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="saveBtn" type="button">Submit Request</button>
+        <button class="btn" id="clearBtn" type="button">Clear</button>
+        <button class="btn danger is-hidden" id="cancelBtn" type="button">Cancel Reservation</button>
+      </div>
+      <div id="formMsg" class="msg"></div>
     </div>
-    <div class="field" id="depIcaoField">
-      <label for="depIcao">Departure Airport</label>
-      <input id="depIcao" type="text" maxlength="4" autocomplete="off" required />
-      <div id="depIcaoSuggestions" class="airportSuggestions"></div>
-    </div>
-    <div class="field" id="destIcaoField">
-      <label for="destIcao">Destination Airport</label>
-      <input id="destIcao" type="text" maxlength="4" autocomplete="off" required />
-      <div id="destIcaoSuggestions" class="airportSuggestions"></div>
-    </div>
-    <div class="field">
-      <label for="travelingOwner">Traveling Owner</label>
-      <select id="travelingOwner" class="js-custom-select"></select>
-    </div>
-    <div class="field">
-      <label for="reservationNotes">Notes</label>
-      <textarea id="reservationNotes"></textarea>
-    </div>
-    <div class="actions">
-      <button class="btn primary" id="saveBtn" type="button">Submit Request</button>
-      <button class="btn" id="clearBtn" type="button">Clear</button>
-      <button class="btn danger" id="cancelBtn" type="button" style="display:none;">Cancel Reservation</button>
-    </div>
-    <div id="formMsg" class="msg"></div>
 
-    <h3 style="margin-top:18px;">My Pending Requests</h3>
-    <div id="myPendingList"></div>
+    <div class="quietSection">
+      <h3 class="sectionTitle">My Pending Requests</h3>
+      <div id="myPendingList"></div>
+    </div>
 
-    <h3 style="margin-top:18px;">Availability</h3>
-    <div id="availabilityMeta" class="kv">Loading...</div>
+    <div class="quietSection">
+      <h3 class="sectionTitle">Availability</h3>
+      <div id="availabilityMeta" class="kv">Loading...</div>
+    </div>
 
-    <h3 style="margin-top:18px;">Upcoming</h3>
-    <div id="upcomingList"></div>
+    <div class="quietSection">
+      <h3 class="sectionTitle">Upcoming</h3>
+      <div id="upcomingList"></div>
+    </div>
   </div>
 </section>
 {% endblock %}
@@ -156,6 +181,22 @@
     if(window.TBMReservationUI){ window.TBMReservationUI.initQuarterHourSelect(selectEl, 'Select time'); }
   }
 
+  function setSelectValue(selectEl, value, fallback = ''){
+    if(!(selectEl instanceof HTMLSelectElement)) return;
+    const hasValue = value && Array.from(selectEl.options).some((option) => option.value === value);
+    const hasFallback = fallback && Array.from(selectEl.options).some((option) => option.value === fallback);
+    selectEl.value = hasValue ? value : (hasFallback ? fallback : '');
+    selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+    const triggerId = selectEl.dataset.customSelectTriggerId || '';
+    if(triggerId){
+      const trigger = document.getElementById(triggerId);
+      if(trigger){
+        const selected = selectEl.options[selectEl.selectedIndex];
+        trigger.textContent = selected ? selected.textContent || '' : 'Select time';
+      }
+    }
+  }
+
   function applyEndConstraints(){
     el.endDate.min = el.startDate.value || '';
     if (el.endDate.value && el.startDate.value && el.endDate.value < el.startDate.value) {
@@ -187,9 +228,9 @@
     el.saveBtn.textContent = 'Submit Request';
     el.cancelBtn.style.display = 'none';
     el.startDate.value = '';
-    el.startTime.value = '';
+    setSelectValue(el.startTime, '06:00');
     el.endDate.value = '';
-    el.endTime.value = '';
+    setSelectValue(el.endTime, '06:00');
     el.endDate.min = '';
     el.depIcao.value = '';
     el.destIcao.value = '';
@@ -225,9 +266,9 @@
     const start = localIsoToDateTime(leg.start_local);
     const end = localIsoToDateTime(leg.end_local);
     el.startDate.value = start.date;
-    el.startTime.value = toQuarterHour(start.time);
+    setSelectValue(el.startTime, toQuarterHour(start.time), '06:00');
     el.endDate.value = end.date;
-    el.endTime.value = toQuarterHour(end.time);
+    setSelectValue(el.endTime, toQuarterHour(end.time), '06:00');
     applyEndConstraints();
     el.depIcao.value = (leg.dep_icao || '').toUpperCase();
     el.destIcao.value = (leg.dest_icao || '').toUpperCase();
@@ -260,6 +301,17 @@
       return;
     }
     const isRoundtrip = activeDraftData.trip_type === 'roundtrip' && Array.isArray(activeDraftData.legs) && activeDraftData.legs.length > 1;
+    if(!isRoundtrip){
+      quoteDraftPanel.innerHTML = `
+        <div class="draftPanel">
+          <h4>Quote Draft (ONEWAY)</h4>
+          <div class="kv">Estimate details are prefilled in the reservation form below.</div>
+          <div class="kv">Expires: ${(activeDraftData.expires_at || '').slice(0, 16).replace('T', ' ')}</div>
+        </div>
+      `;
+      return;
+    }
+
     const legsHtml = (activeDraftData.legs || []).map((leg, index)=>{
       const start = localIsoToDateTime(leg.start_local);
       const end = localIsoToDateTime(leg.end_local);
@@ -269,7 +321,7 @@
       return `
         <div class="draftLeg">
           <strong>Leg ${index + 1}: ${dep} -> ${dest}</strong>
-          <div class="draftGrid" style="margin-top:6px;">
+          <div class="draftGrid draftGridSpaced">
             <input id="draftLeg${index}_startDate" type="date" value="${start.date}" />
             <select id="draftLeg${index}_startTime" class="js-custom-select"></select>
             <input id="draftLeg${index}_endDate" type="date" value="${end.date}" />
@@ -277,10 +329,9 @@
             <input id="draftLeg${index}_dep" type="text" maxlength="4" value="${dep}" />
             <input id="draftLeg${index}_dest" type="text" maxlength="4" value="${dest}" />
           </div>
-          <textarea id="draftLeg${index}_notes" style="margin-top:6px;width:100%;min-height:58px;border:1px solid rgba(255,255,255,.18);background:rgba(8,14,28,.5);color:var(--text);border-radius:10px;padding:8px 10px;">${notes}</textarea>
-          ${!isRoundtrip ? `<div class="draftHint">Use "Apply to form" then submit with the normal button.</div>` : ''}
-          <div class="actions" style="margin-top:6px;">
-            <button class="btn small" type="button" data-apply-leg="${index}">Apply to Form</button>
+          <textarea id="draftLeg${index}_notes" class="draftNotes">${notes}</textarea>
+          <div class="actions actionsTop6">
+            <button class="btn small" type="button" data-apply-leg="${index}">Load Leg in Form</button>
           </div>
         </div>
       `;
@@ -291,7 +342,7 @@
         <h4>Quote Draft (${(activeDraftData.trip_type || 'oneway').toUpperCase()})</h4>
         <div class="kv">Expires: ${(activeDraftData.expires_at || '').slice(0, 16).replace('T', ' ')}</div>
         ${legsHtml}
-        ${isRoundtrip ? `<div class="actions" style="margin-top:10px;">
+        ${isRoundtrip ? `<div class="actions actionsTop10">
           <button class="btn primary" id="submitDraftRoundtripBtn" type="button">Submit 2 Requests</button>
         </div>` : ''}
       </div>
@@ -315,11 +366,11 @@
     const startParts = splitIsoToDateTime(reservation.start);
     const endParts = splitIsoToDateTime(reservation.end);
     el.startDate.value = startParts.date;
-    el.startTime.value = startParts.time;
+    setSelectValue(el.startTime, startParts.time, '06:00');
     el.endDate.value = endParts.date;
-    el.endTime.value = endParts.time;
-    el.startTime.value = toQuarterHour(el.startTime.value);
-    el.endTime.value = toQuarterHour(el.endTime.value);
+    setSelectValue(el.endTime, endParts.time, '06:00');
+    setSelectValue(el.startTime, toQuarterHour(el.startTime.value), '06:00');
+    setSelectValue(el.endTime, toQuarterHour(el.endTime.value), '06:00');
     applyEndConstraints();
     el.depIcao.value = reservation.dep_icao;
     el.destIcao.value = reservation.dest_icao;
