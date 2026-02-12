@@ -505,6 +505,45 @@ def _nominatim_item_to_geocode(item: dict, query: str) -> dict | None:
         return None
 
 
+def _compact_address_suggestion_label(display_name: str) -> str:
+    raw = (display_name or "").strip()
+    if not raw:
+        return raw
+
+    country_tokens = {
+        "united states",
+        "united states of america",
+        "usa",
+        "u.s.a.",
+        "us",
+        "u.s.",
+    }
+
+    parts = [p.strip() for p in raw.split(",") if p and p.strip()]
+    filtered: list[str] = []
+    for part in parts:
+        low = part.lower()
+        if "county" in low:
+            continue
+        if low in country_tokens:
+            continue
+        filtered.append(part)
+
+    if not filtered:
+        return raw
+
+    deduped: list[str] = []
+    seen = set()
+    for part in filtered:
+        key = part.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(part)
+
+    return ", ".join(deduped) if deduped else raw
+
+
 def suggest_addresses(query: str, limit: int | None = None) -> list[dict]:
     q = (query or "").strip()
     if len(q) < GEOCODE_SUGGEST_MIN_CHARS:
@@ -528,7 +567,7 @@ def suggest_addresses(query: str, limit: int | None = None) -> list[dict]:
         parsed = _nominatim_item_to_geocode(item, q)
         if not parsed:
             continue
-        display_name = parsed["display_name"]
+        display_name = _compact_address_suggestion_label(parsed["display_name"])
         if display_name in seen:
             continue
         seen.add(display_name)

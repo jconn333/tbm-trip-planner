@@ -238,6 +238,12 @@ def test_api_address_suggest(monkeypatch):
     assert "display_name" in data[0]
 
 
+def test_compact_address_suggestion_label_strips_county_and_country():
+    raw = "2711 Oklahoma Avenue, Trenton, Grundy County, Missouri, 64683, United States"
+    compact = tbm_app._compact_address_suggestion_label(raw)
+    assert compact == "2711 Oklahoma Avenue, Trenton, Missouri, 64683"
+
+
 @pytest.fixture
 def chat_local_mode(monkeypatch):
     monkeypatch.setattr(tbm_app, "OpenAI", None)

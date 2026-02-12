@@ -333,6 +333,37 @@
       font-size: 12px;
       cursor: pointer;
     }
+    .nearbyActions {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      justify-self: end;
+    }
+    .nearbyAction {
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.08);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 6px 9px;
+      font-size: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 30px;
+      transition: border-color .14s ease, background .14s ease;
+    }
+    .nearbyAction:hover {
+      border-color: rgba(110,168,254,0.45);
+      background: rgba(255,255,255,0.12);
+    }
+    .nearbyMore {
+      border-color: rgba(110,168,254,0.30);
+      background: rgba(110,168,254,0.10);
+      color: rgba(240,248,255,0.95);
+    }
     .nearbyMeta {
       margin-top: 6px;
       font-size: 12px;
@@ -348,6 +379,7 @@
       .assumptionGrid { grid-template-columns: 1fr; }
       .nearbyFilters { grid-template-columns: 1fr 1fr; }
       .nearbyItem { grid-template-columns: 1fr; }
+      .nearbyActions { justify-self: start; }
     }
 {% endblock %}
 {% block content %}
@@ -659,7 +691,7 @@
 
         const useBtn = document.createElement("button");
         useBtn.type = "button";
-        useBtn.className = "nearbyUse";
+        useBtn.className = "nearbyAction nearbyUse";
         useBtn.textContent = "Use";
         useBtn.addEventListener("click", () => {
           if (!depEl.value) depEl.value = item.icao;
@@ -669,9 +701,24 @@
           destEl.dispatchEvent(new Event("input"));
         });
 
+        const actions = document.createElement("div");
+        actions.className = "nearbyActions";
+        actions.appendChild(useBtn);
+
+        const icao = (item.icao || "").trim().toUpperCase();
+        if (icao) {
+          const moreLink = document.createElement("a");
+          moreLink.className = "nearbyAction nearbyMore";
+          moreLink.textContent = "More details";
+          moreLink.href = `https://www.airnav.com/airport/${encodeURIComponent(icao)}`;
+          moreLink.target = "_blank";
+          moreLink.rel = "noopener noreferrer";
+          actions.appendChild(moreLink);
+        }
+
         row.appendChild(label);
         row.appendChild(dist);
-        row.appendChild(useBtn);
+        row.appendChild(actions);
         row.appendChild(details);
         addressLookupResults.appendChild(row);
       });
