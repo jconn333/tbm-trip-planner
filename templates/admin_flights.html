@@ -1,0 +1,412 @@
+{% extends "base.html" %}
+{% block title %}Admin Flights · {{ app_name }}{% endblock %}
+{% block header_subtitle %}All reservations with filters and management actions.{% endblock %}
+{% block page_styles %}
+.grid{display:grid;grid-template-columns:1fr;gap:12px}
+.panel{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);border-radius:16px;padding:12px}
+.filters{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:8px}
+@media (max-width: 980px){.filters{grid-template-columns:repeat(2,minmax(120px,1fr));}}
+input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);background:rgba(8,14,28,.5);color:var(--text);border-radius:10px;padding:8px 10px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--text);border-radius:999px;padding:7px 11px;cursor:pointer;font-size:12px}
+.item{border-top:1px solid rgba(255,255,255,.08);padding:10px 0}
+.item:first-child{border-top:0}
+.meta{color:var(--muted);font-size:12px;margin-top:4px}
+.pager{display:flex;align-items:center;justify-content:space-between;margin-top:10px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:40}
+.modal.open{display:flex}
+.modalCard{width:min(840px,100%);max-height:85vh;overflow:auto;border:1px solid rgba(255,255,255,.16);background:#111a2b;border-radius:14px;padding:14px}
+.modalHeader{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
+.field{margin-bottom:10px;position:relative}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+.dtGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dtBox{border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:8px;cursor:text}
+.airportSuggestions{position:absolute;left:0;right:0;top:100%;margin-top:4px;border:1px solid rgba(255,255,255,.16);border-radius:10px;background:rgba(8,14,28,.98);z-index:60;overflow:hidden;display:none}
+.airportSuggestions.open{display:block}
+.airportOption{width:100%;border:0;border-top:1px solid rgba(255,255,255,.08);background:transparent;color:var(--text);text-align:left;padding:8px 10px;cursor:pointer;font-size:12px}
+.airportOption:first-child{border-top:0}
+.reviewItem{border-top:1px solid rgba(255,255,255,.08);padding:10px 0}
+.reviewItem:first-child{border-top:0}
+.msg{font-size:12px;color:var(--muted);min-height:16px}
+{% endblock %}
+{% block content %}
+<section class="grid">
+  <div class="panel" style="padding:8px 12px;color:var(--muted);font-size:12px;">
+    Display timezone: {{ home_timezone }}
+  </div>
+  <div class="panel">
+    <div class="filters">
+      <div><label>Status</label><select id="status"><option value="all">All</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="denied">Denied</option><option value="canceled">Canceled</option></select></div>
+      <div><label>Owner</label><select id="owner"><option value="">Any</option></select></div>
+      <div><label>Requester</label><select id="requester"><option value="">Any</option></select></div>
+      <div><label>From</label><input id="from" type="datetime-local" /></div>
+      <div><label>To</label><input id="to" type="datetime-local" /></div>
+      <div><label>Search</label><input id="q" type="text" placeholder="airport/owner" /></div>
+    </div>
+    <div class="actions" style="margin-top:10px;">
+      <button class="btn" id="applyFilters" type="button">Apply Filters</button>
+      <button class="btn" id="clearFilters" type="button">Clear</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div id="list"></div>
+    <div class="pager">
+      <button class="btn" id="prevPage" type="button">Prev</button>
+      <div id="pageMeta" class="meta"></div>
+      <button class="btn" id="nextPage" type="button">Next</button>
+    </div>
+  </div>
+</section>
+
+<section id="editModal" class="modal">
+  <div class="modalCard">
+    <div class="modalHeader">
+      <h3 id="editTitle">Edit Reservation</h3>
+      <button class="btn" type="button" data-close-modal="editModal">Close</button>
+    </div>
+    <div class="field">
+      <label>Departure Date / Time ({{ home_timezone }})</label>
+      <div class="dtGrid dtBox" data-dt-box="edit-start" data-date-input="editStartDate" data-time-input="editStartTime">
+        <input id="editStartDate" type="date" />
+        <select id="editStartTime"></select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Arrival Date / Time ({{ home_timezone }})</label>
+      <div class="dtGrid dtBox" data-dt-box="edit-end" data-date-input="editEndDate" data-time-input="editEndTime">
+        <input id="editEndDate" type="date" />
+        <select id="editEndTime"></select>
+      </div>
+    </div>
+    <div class="field">
+      <label for="editDep">Departure Airport</label>
+      <input id="editDep" type="text" maxlength="4" autocomplete="off" />
+      <div id="editDepSuggestions" class="airportSuggestions"></div>
+    </div>
+    <div class="field">
+      <label for="editDest">Destination Airport</label>
+      <input id="editDest" type="text" maxlength="4" autocomplete="off" />
+      <div id="editDestSuggestions" class="airportSuggestions"></div>
+    </div>
+    <div class="field">
+      <label for="editNotes">Notes</label>
+      <textarea id="editNotes"></textarea>
+    </div>
+    <div class="actions">
+      <button class="btn" id="saveEdit" type="button">Save</button>
+    </div>
+    <div id="editMsg" class="msg"></div>
+  </div>
+</section>
+
+<section id="changesModal" class="modal">
+  <div class="modalCard">
+    <div class="modalHeader">
+      <h3>Change Requests</h3>
+      <button class="btn" type="button" data-close-modal="changesModal">Close</button>
+    </div>
+    <div id="changesBody"></div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const el = {
+    status: document.getElementById('status'), owner: document.getElementById('owner'), requester: document.getElementById('requester'),
+    from: document.getElementById('from'), to: document.getElementById('to'), q: document.getElementById('q'),
+    apply: document.getElementById('applyFilters'), clear: document.getElementById('clearFilters'),
+    list: document.getElementById('list'), prev: document.getElementById('prevPage'), next: document.getElementById('nextPage'), pageMeta: document.getElementById('pageMeta'),
+    editModal: document.getElementById('editModal'),
+    editStartDate: document.getElementById('editStartDate'), editStartTime: document.getElementById('editStartTime'),
+    editEndDate: document.getElementById('editEndDate'), editEndTime: document.getElementById('editEndTime'),
+    editDep: document.getElementById('editDep'), editDest: document.getElementById('editDest'), editNotes: document.getElementById('editNotes'),
+    editDepSuggestions: document.getElementById('editDepSuggestions'), editDestSuggestions: document.getElementById('editDestSuggestions'),
+    saveEdit: document.getElementById('saveEdit'), editMsg: document.getElementById('editMsg'),
+    changesModal: document.getElementById('changesModal'), changesBody: document.getElementById('changesBody')
+  };
+
+  let page = 1;
+  const pageSize = 20;
+  let total = 0;
+  let editingReservationId = null;
+  let loadedItems = [];
+  const FILTER_STORAGE_KEY = 'tbm_admin_flights_filters_v1';
+
+  function setEditMsg(message, bad){
+    el.editMsg.textContent = message || '';
+    el.editMsg.style.color = bad ? '#ffd8de' : 'var(--muted)';
+  }
+
+  function openModal(modal){ modal.classList.add('open'); }
+  function closeModal(modal){ modal.classList.remove('open'); }
+
+  function splitIsoToDateTime(isoString){
+    if(window.TBMReservationUI){ return window.TBMReservationUI.splitIsoToDateTime(isoString); }
+    return { date: '', time: '' };
+  }
+
+  function toQuarterHour(timeValue){
+    if(window.TBMReservationUI){ return window.TBMReservationUI.toQuarterHour(timeValue); }
+    return '';
+  }
+
+  function initQuarterHourSelect(selectEl){
+    if(window.TBMReservationUI){ window.TBMReservationUI.initQuarterHourSelect(selectEl, 'Select time'); }
+  }
+
+  function setupAirportAutocomplete(input, suggestionsEl){
+    if(window.TBMReservationUI){ window.TBMReservationUI.setupAirportAutocomplete(input, suggestionsEl); }
+  }
+
+  function validateModalForm(){
+    const required = [el.editStartDate.value, el.editStartTime.value, el.editEndDate.value, el.editEndTime.value, el.editDep.value.trim(), el.editDest.value.trim()];
+    if(required.some((value)=> !value)){
+      setEditMsg('All departure/arrival date-time and airport fields are required.', true);
+      return null;
+    }
+    const dep = el.editDep.value.trim().toUpperCase();
+    const dest = el.editDest.value.trim().toUpperCase();
+    if(dep === dest){
+      setEditMsg('Departure and destination airports must be different.', true);
+      return null;
+    }
+    const start = new Date(`${el.editStartDate.value}T${el.editStartTime.value}`);
+    const end = new Date(`${el.editEndDate.value}T${el.editEndTime.value}`);
+    if(Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start){
+      setEditMsg('Arrival date/time must be after departure date/time.', true);
+      return null;
+    }
+    return {
+      start_date: el.editStartDate.value,
+      start_time: el.editStartTime.value,
+      end_date: el.editEndDate.value,
+      end_time: el.editEndTime.value,
+      dep_icao: dep,
+      dest_icao: dest,
+      notes: el.editNotes.value.trim(),
+    };
+  }
+
+  function itemActions(item){
+    const buttons = [];
+    buttons.push(`<button class="btn" data-action="edit" data-id="${item.id}">Edit</button>`);
+    if (item.status === 'pending') {
+      buttons.push(`<button class="btn" data-action="approve" data-id="${item.id}">Approve</button>`);
+      buttons.push(`<button class="btn" data-action="deny" data-id="${item.id}">Deny</button>`);
+    }
+    if (item.status === 'pending' || item.status === 'approved') {
+      buttons.push(`<button class="btn" data-action="cancel" data-id="${item.id}">Cancel</button>`);
+    }
+    if (item.status === 'denied' || item.status === 'canceled') {
+      buttons.push(`<button class="btn" data-action="reopen" data-id="${item.id}">Reopen</button>`);
+    }
+    buttons.push(`<button class="btn" data-action="changes" data-id="${item.id}">View Changes</button>`);
+    return buttons.join(' ');
+  }
+
+  async function loadOwners(){
+    const resp = await fetch('/api/owners');
+    if(!resp.ok) return;
+    const owners = await resp.json();
+    const options = owners.map((o)=>`<option value="${o.id}">${o.name}</option>`).join('');
+    el.owner.innerHTML = '<option value="">Any</option>' + options;
+    el.requester.innerHTML = '<option value="">Any</option>' + options;
+  }
+
+  function buildParams(){
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize), status: el.status.value || 'all' });
+    if (el.owner.value) params.set('owner_id', el.owner.value);
+    if (el.requester.value) params.set('requested_by_id', el.requester.value);
+    if (el.from.value) params.set('from', el.from.value);
+    if (el.to.value) params.set('to', el.to.value);
+    if (el.q.value.trim()) params.set('q', el.q.value.trim());
+    return params;
+  }
+
+  function saveFilters(){
+    const payload = {
+      status: el.status.value || 'all',
+      owner: el.owner.value || '',
+      requester: el.requester.value || '',
+      from: el.from.value || '',
+      to: el.to.value || '',
+      q: el.q.value || '',
+    };
+    window.localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(payload));
+  }
+
+  function restoreFilters(){
+    const raw = window.localStorage.getItem(FILTER_STORAGE_KEY);
+    if(!raw) return;
+    try {
+      const data = JSON.parse(raw);
+      if(data.status) el.status.value = data.status;
+      if(typeof data.owner === 'string') el.owner.value = data.owner;
+      if(typeof data.requester === 'string') el.requester.value = data.requester;
+      if(typeof data.from === 'string') el.from.value = data.from;
+      if(typeof data.to === 'string') el.to.value = data.to;
+      if(typeof data.q === 'string') el.q.value = data.q;
+    } catch(_) {}
+  }
+
+  async function loadFlights(){
+    const resp = await fetch(`/api/admin/flights?${buildParams().toString()}`);
+    if(!resp.ok){ el.list.innerHTML = '<div class="meta">Failed to load flights.</div>'; return; }
+    const data = await resp.json();
+    total = data.total || 0;
+    loadedItems = data.items || [];
+    if(!loadedItems.length){ el.list.innerHTML = '<div class="meta">No flights found.</div>'; }
+    else {
+      el.list.innerHTML = loadedItems.map((item)=>`
+        <div class="item">
+          <div><strong>#${item.id}</strong> ${item.status.toUpperCase()} | ${item.dep_icao} -> ${item.dest_icao} (Parked: ${item.parked_icao})</div>
+          <div class="meta">${item.start_display} to ${item.end_display} | Owner: ${item.traveling_owner} | Requested by: ${item.requested_by}</div>
+          <div class="meta">Created: ${item.created_at} | Updated: ${item.updated_at}${item.decision_at ? ` | Decision: ${item.decision_at}` : ''}</div>
+          <div class="meta">${item.notes || ''}</div>
+          <div class="actions" style="margin-top:8px;">${itemActions(item)}</div>
+        </div>
+      `).join('');
+    }
+    const pageCount = Math.max(1, Math.ceil(total / pageSize));
+    el.pageMeta.textContent = `Page ${page} of ${pageCount} (${total} flights)`;
+    el.prev.disabled = page <= 1;
+    el.next.disabled = page >= pageCount;
+  }
+
+  async function apiAction(method, url, body){
+    if(window.TBMReservationUI){
+      const result = await window.TBMReservationUI.apiAction(method, url, body);
+      return result.ok ? result.data : null;
+    }
+    return null;
+  }
+
+  function openEditForItem(item){
+    editingReservationId = item.id;
+    const startParts = splitIsoToDateTime(item.start);
+    const endParts = splitIsoToDateTime(item.end);
+    el.editStartDate.value = startParts.date;
+    el.editStartTime.value = startParts.time;
+    el.editEndDate.value = endParts.date;
+    el.editEndTime.value = endParts.time;
+    el.editStartTime.value = toQuarterHour(el.editStartTime.value);
+    el.editEndTime.value = toQuarterHour(el.editEndTime.value);
+    el.editDep.value = item.dep_icao || '';
+    el.editDest.value = item.dest_icao || '';
+    el.editNotes.value = item.notes || '';
+    setEditMsg('');
+    openModal(el.editModal);
+  }
+
+  async function openChangeRequests(reservationId){
+    const resp = await fetch(`/api/reservations/${reservationId}/change-requests`);
+    const rows = await resp.json().catch(()=>[]);
+    if(!resp.ok){ if(window.TBMUI){ window.TBMUI.toast('Could not load change requests', { error:true }); } return; }
+    if(!rows.length){
+      el.changesBody.innerHTML = '<div class="meta">No change requests.</div>';
+      openModal(el.changesModal);
+      return;
+    }
+    el.changesBody.innerHTML = rows.map((row)=>`
+      <div class="reviewItem">
+        <div><strong>#${row.id}</strong> ${row.status.toUpperCase()} | ${row.proposed_dep_icao} -> ${row.proposed_dest_icao}</div>
+        <div class="meta">${row.proposed_start.slice(0,16).replace('T',' ')} to ${row.proposed_end.slice(0,16).replace('T',' ')}</div>
+        <div class="meta">Requester: ${row.requested_by}</div>
+        <div class="meta">${row.proposed_notes || ''}</div>
+        ${row.status === 'pending' ? `
+          <div class="actions" style="margin-top:8px;">
+            <button class="btn" data-cr-action="approve" data-res-id="${reservationId}" data-request-id="${row.id}">Approve</button>
+            <button class="btn" data-cr-action="deny" data-res-id="${reservationId}" data-request-id="${row.id}">Deny</button>
+          </div>
+          <div class="field" style="margin-top:8px;">
+            <label>Deny Note (optional)</label>
+            <input type="text" id="deny-note-${row.id}" placeholder="Denied because..." />
+          </div>
+        ` : `<div class="meta">Decision note: ${row.decision_note || '-'}</div>`}
+      </div>
+    `).join('');
+    openModal(el.changesModal);
+  }
+
+  document.body.addEventListener('click', async (event)=>{
+    const closeModalId = event.target instanceof HTMLElement ? event.target.getAttribute('data-close-modal') : '';
+    if(closeModalId){
+      const modal = document.getElementById(closeModalId);
+      if(modal) closeModal(modal);
+      return;
+    }
+
+    const target = event.target;
+    if(!(target instanceof HTMLElement)) return;
+    const action = target.getAttribute('data-action');
+    const id = target.getAttribute('data-id');
+    if(action && id){
+      if(action === 'approve') { if(await apiAction('POST', `/api/reservations/${id}/approve`)) loadFlights(); return; }
+      if(action === 'deny') { if(await apiAction('POST', `/api/reservations/${id}/deny`, { note: 'Denied by admin.' })) loadFlights(); return; }
+      if(action === 'cancel') { if(await apiAction('POST', `/api/reservations/${id}/cancel`)) loadFlights(); return; }
+      if(action === 'reopen') { if(await apiAction('POST', `/api/reservations/${id}/reopen`, { target_status: 'pending' })) loadFlights(); return; }
+      if(action === 'changes') { await openChangeRequests(id); return; }
+      if(action === 'edit') {
+        const item = loadedItems.find((row)=> String(row.id) === String(id));
+        if(item) openEditForItem(item);
+        return;
+      }
+    }
+
+    const crAction = target.getAttribute('data-cr-action');
+    const resId = target.getAttribute('data-res-id');
+    const requestId = target.getAttribute('data-request-id');
+    if(crAction && resId && requestId){
+      if(crAction === 'approve'){
+        if(await apiAction('POST', `/api/reservations/${resId}/change-requests/${requestId}/approve`)){
+          await openChangeRequests(resId);
+          loadFlights();
+        }
+        return;
+      }
+      if(crAction === 'deny'){
+        const noteInput = document.getElementById(`deny-note-${requestId}`);
+        const note = noteInput instanceof HTMLInputElement ? noteInput.value.trim() : '';
+        if(await apiAction('POST', `/api/reservations/${resId}/change-requests/${requestId}/deny`, { note })){
+          await openChangeRequests(resId);
+          loadFlights();
+        }
+      }
+    }
+  });
+
+  el.saveEdit.addEventListener('click', async ()=>{
+    if(!editingReservationId) return;
+    const payload = validateModalForm();
+    if(!payload) return;
+    const ok = await apiAction('PATCH', `/api/reservations/${editingReservationId}`, payload);
+    if(!ok) return;
+    closeModal(el.editModal);
+    loadFlights();
+  });
+
+  el.apply.addEventListener('click', ()=>{ page = 1; saveFilters(); loadFlights(); });
+  el.clear.addEventListener('click', ()=>{
+    el.status.value = 'all'; el.owner.value = ''; el.requester.value = ''; el.from.value = ''; el.to.value = ''; el.q.value = ''; page = 1; saveFilters(); loadFlights();
+  });
+  el.prev.addEventListener('click', ()=>{ page = Math.max(1, page-1); loadFlights(); });
+  el.next.addEventListener('click', ()=>{ page += 1; loadFlights(); });
+
+  setupAirportAutocomplete(el.editDep, el.editDepSuggestions);
+  setupAirportAutocomplete(el.editDest, el.editDestSuggestions);
+  initQuarterHourSelect(el.editStartTime);
+  initQuarterHourSelect(el.editEndTime);
+  if(window.TBMDateTimeBox){ window.TBMDateTimeBox.bindAll(document); }
+
+  async function init(){
+    await loadOwners();
+    restoreFilters();
+    loadFlights();
+  }
+
+  init();
+})();
+</script>
+{% endblock %}

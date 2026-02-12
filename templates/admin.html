@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Admin · {{ app_name }}{% endblock %}
+{% block header_subtitle %}Approval queue and owner account management.{% endblock %}
+{% block page_styles %}
+.layout{ display:grid; grid-template-columns: 1.2fr 0.8fr; gap:12px; }
+@media (max-width: 980px){ .layout{ grid-template-columns:1fr; } }
+.panel{ border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.05); border-radius:16px; padding:12px; }
+.panel h3{ margin:0 0 10px; font-size:15px; }
+.row{ border-top:1px solid rgba(255,255,255,0.1); padding:10px 0; }
+.row:first-child{ border-top:0; }
+.muted{ color:var(--muted); font-size:12px; }
+.actions{ display:flex; gap:8px; margin-top:8px; }
+.btn{ border:1px solid rgba(255,255,255,0.2); background:rgba(255,255,255,0.06); color:var(--text); border-radius:999px; padding:7px 12px; cursor:pointer; font-size:12px; }
+.btn.ok{ border-color:rgba(124,242,194,0.45); background:rgba(124,242,194,0.18); }
+.btn.no{ border-color:rgba(255,92,112,0.55); background:rgba(255,92,112,0.18); }
+.field{ margin-bottom:10px; }
+.field label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
+.field input, .field select{ width:100%; border:1px solid rgba(255,255,255,0.18); background:rgba(8,14,28,0.5); color:var(--text); border-radius:10px; padding:9px 10px; }
+.msg{ color:var(--muted); font-size:12px; min-height:16px; margin-top:8px; }
+{% endblock %}
+{% block content %}
+<section class="layout">
+  <div class="panel">
+    <h3>Pending Requests</h3>
+    <div id="pendingWrap"><div class="muted">Loading...</div></div>
+  </div>
+
+  <div class="panel">
+    <h3>Create Owner</h3>
+    <div class="muted" style="margin-bottom:10px;">
+      Local/staging test owners you can add here:
+      <br /><code>Owner Test One</code> / <code>owner.test1@example.com</code>
+      <br /><code>Owner Test Two</code> / <code>owner.test2@example.com</code>
+      <br /><code>Owner Test Three</code> / <code>owner.test3@example.com</code>
+      <br />Use a temporary password like <code>OwnerTest123!</code> (8+ chars).
+    </div>
+    <div class="field"><label for="ownerName">Name</label><input id="ownerName" type="text" /></div>
+    <div class="field"><label for="ownerEmail">Email</label><input id="ownerEmail" type="email" /></div>
+    <div class="field"><label for="ownerPassword">Temporary Password</label><input id="ownerPassword" type="password" /></div>
+    <button id="createOwnerBtn" class="btn ok" type="button">Create Owner</button>
+    <div id="createOwnerMsg" class="msg"></div>
+
+    <h3 style="margin-top:18px;">Reset Owner Password</h3>
+    <div class="field">
+      <label for="ownerSelect">Owner</label>
+      <select id="ownerSelect">
+        {% for owner in owners %}
+          <option value="{{ owner.id }}">{{ owner.name }} ({{ owner.email }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label for="resetPassword">New Temporary Password</label><input id="resetPassword" type="password" /></div>
+    <button id="resetOwnerBtn" class="btn" type="button">Reset Password</button>
+    <div id="resetMsg" class="msg"></div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const pendingWrap = document.getElementById('pendingWrap');
+  const ownerSelect = document.getElementById('ownerSelect');
+  const createOwnerMsg = document.getElementById('createOwnerMsg');
+  const resetMsg = document.getElementById('resetMsg');
+
+  function setMsg(el, text, bad) {
+    el.textContent = text || '';
+    el.style.color = bad ? '#ffd8de' : 'var(--muted)';
+  }
+
+  async function loadPending() {
+    const resp = await fetch('/api/pending-reservations');
+    if (!resp.ok) {
+      pendingWrap.innerHTML = '<div class="muted">Could not load pending requests.</div>';
+      return;
+    }
+    const rows = await resp.json();
+    if (!rows.length) {
+      pendingWrap.innerHTML = '<div class="muted">No pending requests.</div>';
+      return;
+    }
+    pendingWrap.innerHTML = '';
+    rows.forEach((row) => {
+      const node = document.createElement('div');
+      node.className = 'row';
+      node.innerHTML = `
+        <div><strong>${row.traveling_owner}</strong> - ${row.dep_icao} -> ${row.dest_icao} (Parked: ${row.parked_icao})</div>
+        <div class="muted">${row.start.slice(0,16).replace('T',' ')} to ${row.end.slice(0,16).replace('T',' ')} | Requested by ${row.requested_by}</div>
+        <div class="muted">${row.notes || ''}</div>
+        <div class="actions">
+          <button class="btn ok" data-action="approve" data-id="${row.id}">Approve</button>
+          <button class="btn no" data-action="deny" data-id="${row.id}">Deny</button>
+        </div>
+      `;
+      pendingWrap.appendChild(node);
+    });
+  }
+
+  async function refreshOwners() {
+    const resp = await fetch('/api/owners');
+    if (!resp.ok) return;
+    const owners = await resp.json();
+    ownerSelect.innerHTML = owners
+      .map((owner) => `<option value="${owner.id}">${owner.name} (${owner.email})</option>`)
+      .join('');
+  }
+
+  pendingWrap.addEventListener('click', async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const action = target.getAttribute('data-action');
+    const id = target.getAttribute('data-id');
+    if (!action || !id) return;
+    const endpoint = action === 'approve' ? `/api/reservations/${id}/approve` : `/api/reservations/${id}/deny`;
+    const payload = action === 'deny' ? { note: 'Denied by admin' } : {};
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      alert(data.error || 'Action failed');
+      return;
+    }
+    loadPending();
+  });
+
+  document.getElementById('createOwnerBtn').addEventListener('click', async () => {
+    const payload = {
+      name: document.getElementById('ownerName').value.trim(),
+      email: document.getElementById('ownerEmail').value.trim(),
+      password: document.getElementById('ownerPassword').value
+    };
+    const resp = await fetch('/api/owners', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      setMsg(createOwnerMsg, data.error || 'Create failed', true);
+      return;
+    }
+    setMsg(createOwnerMsg, 'Owner created.');
+    await refreshOwners();
+  });
+
+  document.getElementById('resetOwnerBtn').addEventListener('click', async () => {
+    const userId = ownerSelect.value;
+    const password = document.getElementById('resetPassword').value;
+    const resp = await fetch(`/api/owners/${userId}/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      setMsg(resetMsg, data.error || 'Reset failed', true);
+      return;
+    }
+    setMsg(resetMsg, 'Password reset.');
+  });
+
+  loadPending();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Admin Settings · {{ app_name }}{% endblock %}
+{% block header_subtitle %}Runtime reservation settings (stored in SQLite).{% endblock %}
+{% block page_styles %}
+.panel{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);border-radius:16px;padding:12px;max-width:760px}
+.panel + .panel{margin-top:12px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width: 760px){.grid{grid-template-columns:1fr}}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+.field input,.field select{width:100%;border:1px solid rgba(255,255,255,.18);background:rgba(8,14,28,.5);color:var(--text);border-radius:10px;padding:8px 10px}
+.btn{border:1px solid rgba(124,242,194,.45);background:linear-gradient(135deg, rgba(110,168,254,.36), rgba(124,242,194,.28));color:var(--text);border-radius:999px;padding:8px 12px;cursor:pointer}
+.meta{color:var(--muted);font-size:12px;margin-top:8px;white-space:pre-wrap}
+.item{border-top:1px solid rgba(255,255,255,.08);padding:8px 0}
+.item:first-child{border-top:0}
+{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="grid">
+    <div class="field"><label for="home_timezone">Home Timezone</label><input id="home_timezone" type="text" /></div>
+    <div class="field"><label for="reservation_min_minutes">Min Reservation Minutes</label><input id="reservation_min_minutes" type="number" min="1" /></div>
+    <div class="field"><label for="reservation_max_days">Max Reservation Days</label><input id="reservation_max_days" type="number" min="1" /></div>
+    <div class="field"><label for="admin_flights_default_scope">Admin Flights Default Scope</label><select id="admin_flights_default_scope"><option value="future_only">Future Only</option><option value="all">All History</option></select></div>
+    <div class="field"><label for="user_show_closed_default">User Show Closed Default</label><select id="user_show_closed_default"><option value="false">False</option><option value="true">True</option></select></div>
+  </div>
+  <div style="margin-top:10px;"><button id="saveBtn" class="btn" type="button">Save Settings</button></div>
+  <div id="msg" class="meta"></div>
+</section>
+<section class="panel">
+  <h3 style="margin:0 0 8px;">Settings History</h3>
+  <div id="historyList"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const fields = ['home_timezone', 'reservation_min_minutes', 'reservation_max_days', 'admin_flights_default_scope', 'user_show_closed_default'];
+  const msg = document.getElementById('msg');
+  const historyList = document.getElementById('historyList');
+
+  function setMsg(text, bad){ msg.textContent = text || ''; msg.style.color = bad ? '#ffd8de' : 'var(--muted)'; }
+
+  async function loadSettings(){
+    const resp = await fetch('/api/admin/settings');
+    if(!resp.ok){ setMsg('Could not load settings', true); return; }
+    const data = await resp.json();
+    const s = data.settings || {};
+    fields.forEach((k)=>{ const el = document.getElementById(k); if(el) el.value = s[k] ?? ''; });
+    setMsg('Loaded settings.');
+  }
+
+  async function loadHistory(){
+    const resp = await fetch('/api/admin/settings/history?page=1&page_size=25');
+    if(!resp.ok){ historyList.innerHTML = '<div class="meta">Could not load settings history.</div>'; return; }
+    const data = await resp.json();
+    const rows = data.items || [];
+    if(!rows.length){ historyList.innerHTML = '<div class="meta">No settings changes recorded yet.</div>'; return; }
+    historyList.innerHTML = rows.map((row)=>`
+      <div class="item">
+        <div><strong>${row.key}</strong></div>
+        <div class="meta">${row.old_value ?? '(empty)'} -> ${row.new_value ?? '(empty)'}</div>
+        <div class="meta">${row.changed_at} by ${row.changed_by}</div>
+      </div>
+    `).join('');
+  }
+
+  document.getElementById('saveBtn').addEventListener('click', async ()=>{
+    const payload = {};
+    fields.forEach((k)=>{ const el = document.getElementById(k); if(el) payload[k] = el.value; });
+    const resp = await fetch('/api/admin/settings', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok){ setMsg(data.error || 'Save failed', true); return; }
+    setMsg('Settings saved.');
+    loadSettings();
+    loadHistory();
+  });
+
+  loadSettings();
+  loadHistory();
+})();
+</script>
+{% endblock %}

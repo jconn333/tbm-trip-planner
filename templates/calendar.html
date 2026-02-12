@@ -1,0 +1,356 @@
+{% extends "base.html" %}
+{% block title %}Calendar · {{ app_name }}{% endblock %}
+{% block header_subtitle %}Single-aircraft reservation board ({{ home_timezone }}).{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css">
+{% endblock %}
+{% block page_styles %}
+.layout{display:grid;grid-template-columns:1.2fr .8fr;gap:12px}
+@media (max-width:980px){.layout{grid-template-columns:1fr}}
+.panel{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);border-radius:16px;padding:12px}
+.panel h3{margin:0 0 10px;font-size:15px}
+#calendar{min-height:620px}
+.field{margin-bottom:10px;position:relative}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+.field input,.field select,.field textarea{width:100%;border:1px solid rgba(255,255,255,.18);background:rgba(8,14,28,.5);color:var(--text);border-radius:10px;padding:9px 10px}
+.field textarea{min-height:76px;resize:vertical}
+.dtGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dtBox{border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:8px;cursor:text}
+.dtBox:focus-within{border-color:rgba(124,242,194,.45)}
+.airportSuggestions{position:absolute;left:0;right:0;top:100%;margin-top:4px;border:1px solid rgba(255,255,255,.16);border-radius:10px;background:rgba(8,14,28,.98);backdrop-filter:blur(4px);z-index:25;overflow:hidden;display:none}
+.airportSuggestions.open{display:block}
+.airportOption{width:100%;border:0;border-top:1px solid rgba(255,255,255,.08);background:transparent;color:var(--text);text-align:left;padding:8px 10px;cursor:pointer;font-size:12px}
+.airportOption:first-child{border-top:0}
+.airportOption:hover{background:rgba(255,255,255,.08)}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--text);border-radius:999px;padding:8px 12px;cursor:pointer}
+.btn.primary{border-color:rgba(124,242,194,.45);background:linear-gradient(135deg, rgba(110,168,254,.36), rgba(124,242,194,.28))}
+.btn.danger{border-color:rgba(255,92,112,.55);background:rgba(255,92,112,.2)}
+.btn.small{padding:6px 10px;font-size:11px}
+.item{border-top:1px solid rgba(255,255,255,.08);padding:8px 0;font-size:13px}
+.item:first-child{border-top:0}
+.kv{color:var(--muted);font-size:12px;margin-top:4px}
+.inline{display:flex;align-items:center;gap:8px;margin-bottom:10px;color:var(--muted);font-size:12px}
+.msg{margin-top:8px;font-size:12px;color:var(--muted);min-height:16px}
+.pendingItemHead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+{% endblock %}
+{% block content %}
+<section class="layout">
+  <div class="panel">
+    <div class="inline">
+      <input id="includeNonBlocking" type="checkbox" />
+      <label for="includeNonBlocking">Show denied/canceled</label>
+    </div>
+    <div id="calendar"></div>
+  </div>
+
+  <div class="panel">
+    <h3>Request / Edit Reservation</h3>
+    <div class="kv" style="margin-bottom:8px;">Need a full list view? Open <a href="/my-flights">My Flights</a>.</div>
+
+    <div class="field">
+      <label>Departure Date / Time ({{ home_timezone }})</label>
+      <div class="dtGrid dtBox" data-dt-box="start" data-date-input="startDate" data-time-input="startTime">
+        <input id="startDate" type="date" required />
+        <select id="startTime" required></select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Arrival Date / Time ({{ home_timezone }})</label>
+      <div class="dtGrid dtBox" data-dt-box="end" data-date-input="endDate" data-time-input="endTime">
+        <input id="endDate" type="date" required />
+        <select id="endTime" required></select>
+      </div>
+    </div>
+    <div class="field" id="depIcaoField">
+      <label for="depIcao">Departure Airport</label>
+      <input id="depIcao" type="text" maxlength="4" autocomplete="off" required />
+      <div id="depIcaoSuggestions" class="airportSuggestions"></div>
+    </div>
+    <div class="field" id="destIcaoField">
+      <label for="destIcao">Destination Airport</label>
+      <input id="destIcao" type="text" maxlength="4" autocomplete="off" required />
+      <div id="destIcaoSuggestions" class="airportSuggestions"></div>
+    </div>
+    <div class="field">
+      <label for="travelingOwner">Traveling Owner</label>
+      <select id="travelingOwner"></select>
+    </div>
+    <div class="field">
+      <label for="reservationNotes">Notes</label>
+      <textarea id="reservationNotes"></textarea>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="saveBtn" type="button">Submit Request</button>
+      <button class="btn" id="clearBtn" type="button">Clear</button>
+      <button class="btn danger" id="cancelBtn" type="button" style="display:none;">Cancel Reservation</button>
+    </div>
+    <div id="formMsg" class="msg"></div>
+
+    <h3 style="margin-top:18px;">My Pending Requests</h3>
+    <div id="myPendingList"></div>
+
+    <h3 style="margin-top:18px;">Availability</h3>
+    <div id="availabilityMeta" class="kv">Loading...</div>
+
+    <h3 style="margin-top:18px;">Upcoming</h3>
+    <div id="upcomingList"></div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+<script>
+(() => {
+  const statusColor = { pending:'#e7b45f', approved:'#5fcfb4', denied:'#9aa2b4', canceled:'#8893a7' };
+  const el = {
+    includeNonBlocking: document.getElementById('includeNonBlocking'),
+    startDate: document.getElementById('startDate'),
+    startTime: document.getElementById('startTime'),
+    endDate: document.getElementById('endDate'),
+    endTime: document.getElementById('endTime'),
+    depIcao: document.getElementById('depIcao'),
+    destIcao: document.getElementById('destIcao'),
+    depIcaoSuggestions: document.getElementById('depIcaoSuggestions'),
+    destIcaoSuggestions: document.getElementById('destIcaoSuggestions'),
+    travelingOwner: document.getElementById('travelingOwner'),
+    reservationNotes: document.getElementById('reservationNotes'),
+    saveBtn: document.getElementById('saveBtn'),
+    clearBtn: document.getElementById('clearBtn'),
+    cancelBtn: document.getElementById('cancelBtn'),
+    formMsg: document.getElementById('formMsg'),
+    myPendingList: document.getElementById('myPendingList'),
+    upcomingList: document.getElementById('upcomingList'),
+    availabilityMeta: document.getElementById('availabilityMeta')
+  };
+
+  let editingId = null;
+
+  function setMsg(message, isError){
+    el.formMsg.textContent = message || '';
+    el.formMsg.style.color = isError ? '#ffd8de' : 'var(--muted)';
+  }
+
+  function splitIsoToDateTime(isoString){
+    if(window.TBMReservationUI){ return window.TBMReservationUI.splitIsoToDateTime(isoString); }
+    return { date: '', time: '' };
+  }
+
+  function toQuarterHour(timeValue){
+    if(window.TBMReservationUI){ return window.TBMReservationUI.toQuarterHour(timeValue); }
+    return '';
+  }
+
+  function initQuarterHourSelect(selectEl){
+    if(window.TBMReservationUI){ window.TBMReservationUI.initQuarterHourSelect(selectEl, 'Select time'); }
+  }
+
+  function applyEndConstraints(){
+    el.endDate.min = el.startDate.value || '';
+    if (el.endDate.value && el.startDate.value && el.endDate.value < el.startDate.value) {
+      el.endDate.value = el.startDate.value;
+    }
+  }
+
+  function validateDateTimeOrder(){
+    if (!el.startDate.value || !el.startTime.value || !el.endDate.value || !el.endTime.value) {
+      setMsg('Departure and arrival date/time are required.', true);
+      return false;
+    }
+    const start = new Date(`${el.startDate.value}T${el.startTime.value}`);
+    const end = new Date(`${el.endDate.value}T${el.endTime.value}`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return true;
+    if (end <= start) {
+      setMsg('Arrival date/time must be after departure date/time.', true);
+      return false;
+    }
+    if (el.depIcao.value.trim().toUpperCase() && el.destIcao.value.trim().toUpperCase() && el.depIcao.value.trim().toUpperCase() === el.destIcao.value.trim().toUpperCase()) {
+      setMsg('Departure and destination airports must be different.', true);
+      return false;
+    }
+    return true;
+  }
+
+  function resetForm(){
+    editingId = null;
+    el.saveBtn.textContent = 'Submit Request';
+    el.cancelBtn.style.display = 'none';
+    el.startDate.value = '';
+    el.startTime.value = '';
+    el.endDate.value = '';
+    el.endTime.value = '';
+    el.endDate.min = '';
+    el.depIcao.value = '';
+    el.destIcao.value = '';
+    el.reservationNotes.value = '';
+    el.depIcaoSuggestions.innerHTML = '';
+    el.depIcaoSuggestions.classList.remove('open');
+    el.destIcaoSuggestions.innerHTML = '';
+    el.destIcaoSuggestions.classList.remove('open');
+    setMsg('');
+  }
+
+  function setReservationIntoForm(reservation){
+    editingId = parseInt(reservation.id, 10);
+    el.saveBtn.textContent = 'Save Changes';
+    el.cancelBtn.style.display = 'inline-block';
+    const startParts = splitIsoToDateTime(reservation.start);
+    const endParts = splitIsoToDateTime(reservation.end);
+    el.startDate.value = startParts.date;
+    el.startTime.value = startParts.time;
+    el.endDate.value = endParts.date;
+    el.endTime.value = endParts.time;
+    el.startTime.value = toQuarterHour(el.startTime.value);
+    el.endTime.value = toQuarterHour(el.endTime.value);
+    applyEndConstraints();
+    el.depIcao.value = reservation.dep_icao;
+    el.destIcao.value = reservation.dest_icao;
+    el.reservationNotes.value = reservation.notes || '';
+    setMsg(`Editing pending request #${reservation.id}`);
+  }
+
+  async function loadOwners(){
+    const resp = await fetch('/api/owners');
+    if (!resp.ok) return;
+    const owners = await resp.json();
+    el.travelingOwner.innerHTML = owners.map((owner)=>`<option value="${owner.id}">${owner.name}</option>`).join('');
+  }
+
+  async function loadMyPendingReservations(){
+    const resp = await fetch('/api/my-pending-reservations');
+    if(!resp.ok){ el.myPendingList.innerHTML = '<div class="kv">Could not load your pending requests.</div>'; return; }
+    const rows = await resp.json();
+    if(!Array.isArray(rows) || rows.length === 0){ el.myPendingList.innerHTML = '<div class="kv">No pending requests.</div>'; return; }
+    el.myPendingList.innerHTML = '';
+    rows.forEach((row)=>{
+      const node = document.createElement('div');
+      node.className = 'item';
+      node.innerHTML = `
+        <div class="pendingItemHead">
+          <div><strong>${row.dep_icao} -> ${row.dest_icao}</strong></div>
+          <button class="btn small" type="button" data-edit-id="${row.id}">Edit</button>
+        </div>
+        <div class="kv">${row.start.slice(0,16).replace('T',' ')} to ${row.end.slice(0,16).replace('T',' ')}</div>
+        <div class="kv">${row.notes || ''}</div>
+      `;
+      el.myPendingList.appendChild(node);
+    });
+  }
+
+  async function loadSummary(){
+    const now = new Date();
+    const to = new Date(now.getTime() + 1000*60*60*24*30);
+    const params = new URLSearchParams({ from: now.toISOString(), to: to.toISOString() });
+    const resp = await fetch(`/api/availability-summary?${params.toString()}`);
+    if(!resp.ok) return;
+    const data = await resp.json();
+    const next = data.next_available ? `${data.next_available.start.slice(0,16).replace('T',' ')} to ${data.next_available.end.slice(0,16).replace('T',' ')}` : 'No open window in selected range';
+    el.availabilityMeta.textContent = `Current parked: ${data.current_parked_icao}. Next available: ${next}.`;
+
+    el.upcomingList.innerHTML = '';
+    if(!Array.isArray(data.upcoming) || data.upcoming.length===0){ el.upcomingList.innerHTML = '<div class="kv">No upcoming reservations.</div>'; return; }
+    data.upcoming.forEach((item)=>{
+      const node = document.createElement('div');
+      node.className = 'item';
+      node.innerHTML = `
+        <div><strong>${item.traveling_owner}</strong> - ${item.dep_icao} -> ${item.dest_icao} (Parked: ${item.parked_icao})</div>
+        <div class="kv">${item.status.toUpperCase()} | ${item.start.slice(0,16).replace('T',' ')} to ${item.end.slice(0,16).replace('T',' ')}</div>
+      `;
+      el.upcomingList.appendChild(node);
+    });
+  }
+
+  function payloadFromForm(){
+    return {
+      start_date: el.startDate.value,
+      start_time: el.startTime.value,
+      end_date: el.endDate.value,
+      end_time: el.endTime.value,
+      dep_icao: el.depIcao.value.trim().toUpperCase(),
+      dest_icao: el.destIcao.value.trim().toUpperCase(),
+      traveling_user_id: parseInt(el.travelingOwner.value, 10),
+      notes: el.reservationNotes.value.trim()
+    };
+  }
+
+  function setupAirportAutocomplete(input, suggestionsEl){
+    if(window.TBMReservationUI){ window.TBMReservationUI.setupAirportAutocomplete(input, suggestionsEl); }
+  }
+
+  setupAirportAutocomplete(el.depIcao, el.depIcaoSuggestions);
+  setupAirportAutocomplete(el.destIcao, el.destIcaoSuggestions);
+
+  if(window.TBMDateTimeBox){ window.TBMDateTimeBox.bindAll(document); }
+  initQuarterHourSelect(el.startTime);
+  initQuarterHourSelect(el.endTime);
+
+  const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+    initialView:'dayGridMonth',
+    headerToolbar:{ left:'prev,next today', center:'title', right:'dayGridMonth,timeGridWeek,timeGridDay' },
+    events: async (fetchInfo, success, failure)=>{
+      try {
+        const params = new URLSearchParams({ start: fetchInfo.startStr, end: fetchInfo.endStr, include_nonblocking: String(el.includeNonBlocking.checked) });
+        const resp = await fetch(`/api/reservations?${params.toString()}`);
+        if(!resp.ok) throw new Error('Failed to load reservations');
+        const events = await resp.json();
+        success(events.map((event)=>({ ...event, backgroundColor: statusColor[event.status] || '#9aa2b4', borderColor: statusColor[event.status] || '#9aa2b4', textColor:'#0f1725' })));
+      } catch(err){ failure(err); }
+    },
+    eventClick:(info)=>{
+      const event = info.event;
+      if(!event.extendedProps.editable){ setMsg('This reservation is read-only for your account.', true); return; }
+      setReservationIntoForm({ id:event.id, start:event.startStr, end:event.endStr, dep_icao:event.extendedProps.dep_icao, dest_icao:event.extendedProps.dest_icao, notes:event.extendedProps.notes || '' });
+    }
+  });
+
+  el.myPendingList.addEventListener('click', async (event)=>{
+    const target = event.target;
+    if(!(target instanceof HTMLElement)) return;
+    const editId = target.getAttribute('data-edit-id');
+    if(!editId) return;
+    const resp = await fetch('/api/my-pending-reservations');
+    if(!resp.ok) return;
+    const rows = await resp.json();
+    const row = rows.find((item)=> String(item.id) === String(editId));
+    if(!row) return;
+    setReservationIntoForm(row);
+  });
+
+  el.startDate.addEventListener('change', applyEndConstraints);
+  el.includeNonBlocking.addEventListener('change', ()=> calendar.refetchEvents());
+  el.clearBtn.addEventListener('click', ()=> resetForm());
+
+  el.saveBtn.addEventListener('click', async ()=>{
+    if(!validateDateTimeOrder()) return;
+    const payload = payloadFromForm();
+    const endpoint = editingId ? `/api/reservations/${editingId}` : '/api/reservation-requests';
+    const method = editingId ? 'PATCH' : 'POST';
+    const resp = await fetch(endpoint, { method, headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok){ setMsg(data.error || 'Request failed', true); return; }
+    setMsg(editingId ? 'Pending request updated and re-submitted.' : 'Reservation request submitted.');
+    resetForm();
+    calendar.refetchEvents();
+    loadMyPendingReservations();
+    loadSummary();
+  });
+
+  el.cancelBtn.addEventListener('click', async ()=>{
+    if(!editingId) return;
+    const resp = await fetch(`/api/reservations/${editingId}/cancel`, { method:'POST' });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok){ setMsg(data.error || 'Cancel failed', true); return; }
+    setMsg('Reservation canceled.');
+    resetForm();
+    calendar.refetchEvents();
+    loadMyPendingReservations();
+    loadSummary();
+  });
+
+  loadOwners();
+  loadMyPendingReservations();
+  loadSummary();
+  calendar.render();
+})();
+</script>
+{% endblock %}

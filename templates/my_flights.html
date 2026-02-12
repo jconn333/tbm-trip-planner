@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block title %}My Flights · {{ app_name }}{% endblock %}
+{% block header_subtitle %}Your pending requests, upcoming approved flights, and change requests.{% endblock %}
+{% block page_styles %}
+.grid{display:grid;grid-template-columns:1fr;gap:12px}
+.panel{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);border-radius:16px;padding:12px}
+.item{border-top:1px solid rgba(255,255,255,.08);padding:10px 0}
+.item:first-child{border-top:0}
+.meta{color:var(--muted);font-size:12px;margin-top:4px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.btn{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--text);border-radius:999px;padding:7px 11px;cursor:pointer;font-size:12px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:40}
+.modal.open{display:flex}
+.modalCard{width:min(760px,100%);max-height:85vh;overflow:auto;border:1px solid rgba(255,255,255,.16);background:#111a2b;border-radius:14px;padding:14px}
+.field{margin-bottom:10px;position:relative}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+.dtGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dtBox{border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:8px;cursor:text}
+.airportSuggestions{position:absolute;left:0;right:0;top:100%;margin-top:4px;border:1px solid rgba(255,255,255,.16);border-radius:10px;background:rgba(8,14,28,.98);z-index:60;overflow:hidden;display:none}
+.airportSuggestions.open{display:block}
+.airportOption{width:100%;border:0;border-top:1px solid rgba(255,255,255,.08);background:transparent;color:var(--text);text-align:left;padding:8px 10px;cursor:pointer;font-size:12px}
+.airportOption:first-child{border-top:0}
+.msg{font-size:12px;color:var(--muted);min-height:16px}
+{% endblock %}
+{% block content %}
+<section class="grid">
+  <div class="panel" style="padding:8px 12px;color:var(--muted);font-size:12px;">
+    Display timezone: {{ home_timezone }}
+  </div>
+  <div class="panel">
+    <h3>Pending Requests</h3>
+    <div id="pendingList"></div>
+  </div>
+
+  <div class="panel">
+    <h3>Upcoming Approved Flights</h3>
+    <div id="approvedList"></div>
+  </div>
+
+  <div class="panel">
+    <h3>My Change Requests</h3>
+    <div id="changeRequestList"></div>
+  </div>
+</section>
+
+<section id="flightModal" class="modal">
+  <div class="modalCard">
+    <div class="actions" style="justify-content:space-between;margin-bottom:8px;">
+      <h3 id="modalTitle">Edit Flight</h3>
+      <button class="btn" type="button" id="closeModal">Close</button>
+    </div>
+    <div class="field">
+      <label>Departure Date / Time ({{ home_timezone }})</label>
+      <div class="dtGrid dtBox" data-dt-box="modal-start" data-date-input="modalStartDate" data-time-input="modalStartTime">
+        <input id="modalStartDate" type="date" />
+        <select id="modalStartTime"></select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Arrival Date / Time ({{ home_timezone }})</label>
+      <div class="dtGrid dtBox" data-dt-box="modal-end" data-date-input="modalEndDate" data-time-input="modalEndTime">
+        <input id="modalEndDate" type="date" />
+        <select id="modalEndTime"></select>
+      </div>
+    </div>
+    <div class="field">
+      <label for="modalDep">Departure Airport</label>
+      <input id="modalDep" type="text" maxlength="4" autocomplete="off" />
+      <div id="modalDepSuggestions" class="airportSuggestions"></div>
+    </div>
+    <div class="field">
+      <label for="modalDest">Destination Airport</label>
+      <input id="modalDest" type="text" maxlength="4" autocomplete="off" />
+      <div id="modalDestSuggestions" class="airportSuggestions"></div>
+    </div>
+    <div class="field">
+      <label for="modalNotes">Notes</label>
+      <textarea id="modalNotes"></textarea>
+    </div>
+    <div class="actions">
+      <button class="btn" type="button" id="submitModal">Submit</button>
+    </div>
+    <div id="modalMsg" class="msg"></div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const pendingList = document.getElementById('pendingList');
+  const approvedList = document.getElementById('approvedList');
+  const changeRequestList = document.getElementById('changeRequestList');
+  const modal = document.getElementById('flightModal');
+  const modalTitle = document.getElementById('modalTitle');
+  const modalMsg = document.getElementById('modalMsg');
+  const closeModalBtn = document.getElementById('closeModal');
+  const submitModalBtn = document.getElementById('submitModal');
+  const modalStartDate = document.getElementById('modalStartDate');
+  const modalStartTime = document.getElementById('modalStartTime');
+  const modalEndDate = document.getElementById('modalEndDate');
+  const modalEndTime = document.getElementById('modalEndTime');
+  const modalDep = document.getElementById('modalDep');
+  const modalDest = document.getElementById('modalDest');
+  const modalNotes = document.getElementById('modalNotes');
+  const modalDepSuggestions = document.getElementById('modalDepSuggestions');
+  const modalDestSuggestions = document.getElementById('modalDestSuggestions');
+
+  let actionContext = null;
+  let pendingRows = [];
+  let approvedRows = [];
+
+  function setModalMsg(message, bad){
+    modalMsg.textContent = message || '';
+    modalMsg.style.color = bad ? '#ffd8de' : 'var(--muted)';
+  }
+
+  function openModal(){ modal.classList.add('open'); }
+  function closeModal(){ modal.classList.remove('open'); actionContext = null; setModalMsg(''); }
+
+  function splitIsoToDateTime(isoString){
+    if(window.TBMReservationUI){ return window.TBMReservationUI.splitIsoToDateTime(isoString); }
+    return { date: '', time: '' };
+  }
+
+  function toQuarterHour(timeValue){
+    if(window.TBMReservationUI){ return window.TBMReservationUI.toQuarterHour(timeValue); }
+    return '';
+  }
+
+  function initQuarterHourSelect(selectEl){
+    if(window.TBMReservationUI){ window.TBMReservationUI.initQuarterHourSelect(selectEl, 'Select time'); }
+  }
+
+  function setupAirportAutocomplete(input, suggestionsEl){
+    if(window.TBMReservationUI){ window.TBMReservationUI.setupAirportAutocomplete(input, suggestionsEl); }
+  }
+
+  function validateForm(){
+    const required = [modalStartDate.value, modalStartTime.value, modalEndDate.value, modalEndTime.value, modalDep.value.trim(), modalDest.value.trim()];
+    if(required.some((value)=> !value)){
+      setModalMsg('All departure/arrival date-time and airport fields are required.', true);
+      return null;
+    }
+    const dep = modalDep.value.trim().toUpperCase();
+    const dest = modalDest.value.trim().toUpperCase();
+    if(dep === dest){
+      setModalMsg('Departure and destination airports must be different.', true);
+      return null;
+    }
+    const start = new Date(`${modalStartDate.value}T${modalStartTime.value}`);
+    const end = new Date(`${modalEndDate.value}T${modalEndTime.value}`);
+    if(Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start){
+      setModalMsg('Arrival date/time must be after departure date/time.', true);
+      return null;
+    }
+    return {
+      start_date: modalStartDate.value,
+      start_time: modalStartTime.value,
+      end_date: modalEndDate.value,
+      end_time: modalEndTime.value,
+      dep_icao: dep,
+      dest_icao: dest,
+      notes: modalNotes.value.trim(),
+    };
+  }
+
+  async function apiAction(method, url, body){
+    if(window.TBMReservationUI){
+      const result = await window.TBMReservationUI.apiAction(method, url, body);
+      return result.ok ? result.data : null;
+    }
+    return null;
+  }
+
+  function hydrateModal(item, mode){
+    const start = splitIsoToDateTime(item.start);
+    const end = splitIsoToDateTime(item.end);
+    modalStartDate.value = start.date;
+    modalStartTime.value = start.time;
+    modalEndDate.value = end.date;
+    modalEndTime.value = end.time;
+    modalStartTime.value = toQuarterHour(modalStartTime.value);
+    modalEndTime.value = toQuarterHour(modalEndTime.value);
+    modalDep.value = item.dep_icao || '';
+    modalDest.value = item.dest_icao || '';
+    modalNotes.value = item.notes || '';
+    modalTitle.textContent = mode === 'edit-pending' ? `Edit Pending #${item.id}` : `Request Change for #${item.id}`;
+    submitModalBtn.textContent = mode === 'edit-pending' ? 'Save Pending Changes' : 'Submit Change Request';
+    actionContext = { mode, reservationId: item.id };
+    setModalMsg('');
+    openModal();
+  }
+
+  async function loadMyFlights(){
+    const resp = await fetch('/api/my-flights');
+    if(!resp.ok){ pendingList.innerHTML = approvedList.innerHTML = '<div class="meta">Could not load flights.</div>'; return; }
+    const data = await resp.json();
+    pendingRows = data.pending || [];
+    approvedRows = data.approved_upcoming || [];
+
+    if(!pendingRows.length) pendingList.innerHTML = '<div class="meta">No pending requests.</div>';
+    else pendingList.innerHTML = pendingRows.map((item)=>`
+      <div class="item">
+        <div><strong>#${item.id}</strong> ${item.dep_icao} -> ${item.dest_icao}</div>
+        <div class="meta">${item.start_display} to ${item.end_display}</div>
+        <div class="meta">${item.notes || ''}</div>
+        <div class="actions">
+          <button class="btn" data-action="edit-pending" data-id="${item.id}">Edit Pending</button>
+          <button class="btn" data-action="cancel-pending" data-id="${item.id}">Cancel</button>
+        </div>
+      </div>
+    `).join('');
+
+    if(!approvedRows.length) approvedList.innerHTML = '<div class="meta">No upcoming approved flights.</div>';
+    else approvedList.innerHTML = approvedRows.map((item)=>`
+      <div class="item">
+        <div><strong>#${item.id}</strong> ${item.dep_icao} -> ${item.dest_icao}</div>
+        <div class="meta">${item.start_display} to ${item.end_display}</div>
+        <div class="meta">${item.notes || ''}</div>
+        <div class="actions"><button class="btn" data-action="request-change" data-id="${item.id}">Request Change</button></div>
+      </div>
+    `).join('');
+  }
+
+  async function loadMyChangeRequests(){
+    const resp = await fetch('/api/my-change-requests');
+    if(!resp.ok){ changeRequestList.innerHTML = '<div class="meta">Could not load change requests.</div>'; return; }
+    const rows = await resp.json();
+    if(!rows.length){ changeRequestList.innerHTML = '<div class="meta">No change requests.</div>'; return; }
+    changeRequestList.innerHTML = rows.map((r)=>`
+      <div class="item">
+        <div><strong>#${r.id}</strong> Reservation #${r.reservation_id} | ${r.status.toUpperCase()}</div>
+        <div class="meta">${r.proposed_dep_icao} -> ${r.proposed_dest_icao} | ${r.proposed_start.slice(0,16).replace('T',' ')} to ${r.proposed_end.slice(0,16).replace('T',' ')}</div>
+        <div class="meta">${r.proposed_notes || ''}</div>
+      </div>
+    `).join('');
+  }
+
+  document.body.addEventListener('click', async (event)=>{
+    const target = event.target;
+    if(!(target instanceof HTMLElement)) return;
+    const action = target.getAttribute('data-action');
+    const id = target.getAttribute('data-id');
+    if(!action || !id) return;
+
+    if(action === 'edit-pending'){
+      const item = pendingRows.find((row)=> String(row.id) === String(id));
+      if(item) hydrateModal(item, 'edit-pending');
+      return;
+    }
+
+    if(action === 'cancel-pending'){
+      const ok = await apiAction('POST', `/api/reservations/${id}/cancel`);
+      if(ok){ loadMyFlights(); }
+      return;
+    }
+
+    if(action === 'request-change'){
+      const item = approvedRows.find((row)=> String(row.id) === String(id));
+      if(item) hydrateModal(item, 'request-change');
+      return;
+    }
+  });
+
+  submitModalBtn.addEventListener('click', async ()=>{
+    if(!actionContext) return;
+    const payload = validateForm();
+    if(!payload) return;
+    let result = null;
+    if(actionContext.mode === 'edit-pending'){
+      result = await apiAction('PATCH', `/api/reservations/${actionContext.reservationId}`, payload);
+      if(result){
+        closeModal();
+        loadMyFlights();
+      }
+      return;
+    }
+    result = await apiAction('POST', `/api/reservations/${actionContext.reservationId}/change-requests`, payload);
+    if(result){
+      closeModal();
+      loadMyChangeRequests();
+    }
+  });
+
+  closeModalBtn.addEventListener('click', ()=> closeModal());
+  modal.addEventListener('click', (event)=>{ if(event.target === modal) closeModal(); });
+
+  setupAirportAutocomplete(modalDep, modalDepSuggestions);
+  setupAirportAutocomplete(modalDest, modalDestSuggestions);
+  initQuarterHourSelect(modalStartTime);
+  initQuarterHourSelect(modalEndTime);
+  if(window.TBMDateTimeBox){ window.TBMDateTimeBox.bindAll(document); }
+
+  loadMyFlights();
+  loadMyChangeRequests();
+})();
+</script>
+{% endblock %}

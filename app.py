@@ -4,18 +4,32 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import ssl
+import secrets
 import time
 import urllib.parse
 import urllib.request
+import uuid
+from collections import defaultdict, deque
 from datetime import date, datetime, timedelta
 from math import asin, atan2, cos, degrees, radians, sin, sqrt
 from threading import Lock
+from zoneinfo import ZoneInfo
 
 import airportsdata
 import certifi
+import db as storage
+from auth import admin_required, hash_password, login_required
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for
+from routes_auth import create_auth_blueprint
+from routes_reservations import create_reservations_blueprint
+
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
 
 # Load .env from the same directory as this file (works no matter where you run from)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +39,17 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 app = Flask(__name__, template_folder="templates")
 
 APP_NAME = "TBM Trip Planner"
+app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "dev-change-me")
+APP_ENV = (os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or "development").strip().lower()
+IS_PRODUCTION = APP_ENV in ("production", "prod")
+IS_DEVELOPMENT = APP_ENV in ("development", "dev", "")
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=IS_PRODUCTION,
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+)
 
 
 # ------------------ Logging ------------------
@@ -90,6 +115,14 @@ GEOCODE_COUNTRY_CODES = os.getenv("GEOCODE_COUNTRY_CODES", "us").strip()
 AIRPORT_META_TIMEOUT_SEC = _env_int("AIRPORT_META_TIMEOUT_SEC", 8)
 AIRPORT_META_CACHE_TTL_SEC = _env_int("AIRPORT_META_CACHE_TTL_SEC", 21600)
 AIRPORT_META_CACHE_MAX_KEYS = _env_int("AIRPORT_META_CACHE_MAX_KEYS", 512)
+TBM_DB_PATH = os.getenv("TBM_DB_PATH", os.path.join(BASE_DIR, "tbm.sqlite3"))
+TBM_HOME_TZ = os.getenv("TBM_HOME_TZ", "America/New_York")
+TBM_DEFAULT_PARKED_ICAO = (os.getenv("TBM_DEFAULT_PARKED_ICAO") or "").strip().upper()
+TBM_BOOTSTRAP_ADMIN_EMAIL = (os.getenv("TBM_BOOTSTRAP_ADMIN_EMAIL") or "").strip()
+TBM_BOOTSTRAP_ADMIN_NAME = (os.getenv("TBM_BOOTSTRAP_ADMIN_NAME") or "").strip()
+TBM_BOOTSTRAP_ADMIN_PASSWORD = (os.getenv("TBM_BOOTSTRAP_ADMIN_PASSWORD") or "").strip()
+RESERVATION_MIN_MINUTES = _env_int("TBM_RESERVATION_MIN_MINUTES", 15)
+RESERVATION_MAX_DAYS = _env_int("TBM_RESERVATION_MAX_DAYS", 45)
 
 ICAO_RE = re.compile(r"^[A-Z][A-Z0-9]{3}$")
 AIRPORT_CODE_RE = re.compile(r"^[A-Z0-9]{2,4}$")
@@ -110,6 +143,33 @@ _GEOCODE_SUGGEST_CACHE: dict[str, tuple[float, list[dict]]] = {}
 _GEOCODE_SUGGEST_CACHE_LOCK = Lock()
 _AIRPORT_META_CACHE: dict[str, tuple[float, dict]] = {}
 _AIRPORT_META_CACHE_LOCK = Lock()
+_SETTINGS_CACHE: dict[str, str] = {}
+_SETTINGS_CACHE_AT = 0.0
+_SETTINGS_CACHE_LOCK = Lock()
+SETTINGS_CACHE_TTL_SEC = 30
+CSRF_SAFE_ENDPOINTS = {
+    "api_login",
+}
+RATE_LIMIT_DEFAULT_WINDOW_SEC = _env_int("TBM_RATE_LIMIT_WINDOW_SEC", 60)
+ENABLE_RATE_LIMIT = (os.getenv("TBM_ENABLE_RATE_LIMIT") or ("true" if IS_PRODUCTION else "false")).strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+RATE_LIMIT_RULES = {
+    "api_login": (_env_int("TBM_RATE_LIMIT_LOGIN_PER_WINDOW", 20), RATE_LIMIT_DEFAULT_WINDOW_SEC),
+    "login_post": (_env_int("TBM_RATE_LIMIT_LOGIN_PER_WINDOW", 20), RATE_LIMIT_DEFAULT_WINDOW_SEC),
+    "api_owner_reset_password": (_env_int("TBM_RATE_LIMIT_ADMIN_WRITES_PER_WINDOW", 60), RATE_LIMIT_DEFAULT_WINDOW_SEC),
+    "api_create_owner": (_env_int("TBM_RATE_LIMIT_ADMIN_WRITES_PER_WINDOW", 60), RATE_LIMIT_DEFAULT_WINDOW_SEC),
+    "api_admin_settings_patch": (_env_int("TBM_RATE_LIMIT_ADMIN_WRITES_PER_WINDOW", 60), RATE_LIMIT_DEFAULT_WINDOW_SEC),
+    "api_approve_reservation": (_env_int("TBM_RATE_LIMIT_ADMIN_WRITES_PER_WINDOW", 60), RATE_LIMIT_DEFAULT_WINDOW_SEC),
+    "api_deny_reservation": (_env_int("TBM_RATE_LIMIT_ADMIN_WRITES_PER_WINDOW", 60), RATE_LIMIT_DEFAULT_WINDOW_SEC),
+    "api_cancel_reservation": (_env_int("TBM_RATE_LIMIT_ADMIN_WRITES_PER_WINDOW", 60), RATE_LIMIT_DEFAULT_WINDOW_SEC),
+    "api_reopen_reservation": (_env_int("TBM_RATE_LIMIT_ADMIN_WRITES_PER_WINDOW", 60), RATE_LIMIT_DEFAULT_WINDOW_SEC),
+}
+_RATE_LIMIT_BUCKETS: dict[str, deque[float]] = defaultdict(deque)
+_RATE_LIMIT_LOCK = Lock()
 
 AIRPORT_LATLON_INDEX: list[tuple[str, float, float]] = []
 for _icao, _a in AIRPORTS.items():
@@ -123,9 +183,514 @@ for _icao, _a in AIRPORTS.items():
         continue
 
 
+# ------------------ Reservation/Auth helpers ------------------
+def _default_runtime_settings() -> dict[str, str]:
+    return {
+        "home_timezone": TBM_HOME_TZ,
+        "reservation_min_minutes": str(RESERVATION_MIN_MINUTES),
+        "reservation_max_days": str(RESERVATION_MAX_DAYS),
+        "admin_flights_default_scope": "future_only",
+        "user_show_closed_default": "false",
+    }
+
+
+def _load_runtime_settings(force: bool = False) -> dict[str, str]:
+    global _SETTINGS_CACHE_AT, _SETTINGS_CACHE
+    now = time.time()
+    with _SETTINGS_CACHE_LOCK:
+        if not force and _SETTINGS_CACHE and (now - _SETTINGS_CACHE_AT) <= SETTINGS_CACHE_TTL_SEC:
+            return dict(_SETTINGS_CACHE)
+
+    defaults = _default_runtime_settings()
+    db_values: dict[str, str] = {}
+    try:
+        with storage.get_conn(TBM_DB_PATH) as conn:
+            db_values = storage.list_settings(conn)
+    except Exception:
+        logger.exception("settings_load_failed")
+    merged = dict(defaults)
+    merged.update(db_values)
+
+    with _SETTINGS_CACHE_LOCK:
+        _SETTINGS_CACHE = dict(merged)
+        _SETTINGS_CACHE_AT = now
+    return merged
+
+
+def _invalidate_settings_cache() -> None:
+    global _SETTINGS_CACHE_AT, _SETTINGS_CACHE
+    with _SETTINGS_CACHE_LOCK:
+        _SETTINGS_CACHE = {}
+        _SETTINGS_CACHE_AT = 0.0
+
+
+def _effective_home_timezone_name() -> str:
+    return _load_runtime_settings().get("home_timezone", TBM_HOME_TZ)
+
+
+def _effective_reservation_min_minutes() -> int:
+    raw = _load_runtime_settings().get("reservation_min_minutes", str(RESERVATION_MIN_MINUTES))
+    try:
+        return max(1, int(raw))
+    except Exception:
+        return RESERVATION_MIN_MINUTES
+
+
+def _effective_reservation_max_days() -> int:
+    raw = _load_runtime_settings().get("reservation_max_days", str(RESERVATION_MAX_DAYS))
+    try:
+        return max(1, int(raw))
+    except Exception:
+        return RESERVATION_MAX_DAYS
+
+
+def _effective_admin_flights_default_scope() -> str:
+    raw = (_load_runtime_settings().get("admin_flights_default_scope") or "").strip().lower()
+    return "all" if raw == "all" else "future_only"
+
+
+def _effective_user_show_closed_default() -> bool:
+    raw = (_load_runtime_settings().get("user_show_closed_default") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _home_zone() -> ZoneInfo:
+    try:
+        return ZoneInfo(_effective_home_timezone_name())
+    except Exception:
+        return ZoneInfo("UTC")
+
+
+def _utc_now() -> datetime:
+    return datetime.now(ZoneInfo("UTC"))
+
+
+def _to_utc_iso(dt: datetime) -> str:
+    return dt.astimezone(ZoneInfo("UTC")).isoformat()
+
+
+def _utc_iso_to_local_display(iso_value: str) -> str:
+    dt = datetime.fromisoformat(iso_value)
+    return dt.astimezone(_home_zone()).strftime("%Y-%m-%d %H:%M")
+
+
+def _utc_iso_to_local_iso(iso_value: str) -> str:
+    dt = datetime.fromisoformat(iso_value)
+    return dt.astimezone(_home_zone()).isoformat()
+
+
+def _parse_local_datetime(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_home_zone())
+    else:
+        dt = dt.astimezone(_home_zone())
+    return dt
+
+
+def _extract_local_datetime_from_payload(
+    payload: dict,
+    *,
+    prefix: str,
+):
+    local_key = f"{prefix}_local"
+    date_key = f"{prefix}_date"
+    time_key = f"{prefix}_time"
+
+    local_raw = payload.get(local_key)
+    date_raw = payload.get(date_key)
+    time_raw = payload.get(time_key)
+
+    if local_raw is not None and str(local_raw).strip():
+        return str(local_raw).strip(), None
+
+    has_date = date_raw is not None and str(date_raw).strip() != ""
+    has_time = time_raw is not None and str(time_raw).strip() != ""
+
+    if has_date or has_time:
+        if not has_date or not has_time:
+            return None, {
+                "message": f"{date_key} and {time_key} are both required when either is provided.",
+                "code": "invalid_datetime",
+                "field": date_key if not has_date else time_key,
+                "status": 400,
+            }
+        return f"{str(date_raw).strip()}T{str(time_raw).strip()}", None
+
+    return None, None
+
+
+def _db_conn():
+    return storage.get_conn(TBM_DB_PATH)
+
+
+def _request_id() -> str:
+    rid = getattr(g, "request_id", None)
+    if rid:
+        return rid
+    return "-"
+
+
+def _client_ip() -> str:
+    fwd = request.headers.get("X-Forwarded-For")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def _get_or_create_csrf_token() -> str:
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+    return token
+
+
+def _verify_csrf_token() -> bool:
+    expected = session.get("csrf_token")
+    if not expected:
+        return False
+    provided = (
+        request.headers.get("X-CSRF-Token")
+        or request.form.get("csrf_token")
+        or request.headers.get("X-XSRF-Token")
+    )
+    return bool(provided) and secrets.compare_digest(str(expected), str(provided))
+
+
+def _enforce_rate_limit(endpoint: str) -> tuple[bool, int | None]:
+    if not ENABLE_RATE_LIMIT:
+        return True, None
+    rule = RATE_LIMIT_RULES.get(endpoint.split(".")[-1])
+    if not rule:
+        return True, None
+    limit, window_sec = rule
+    if limit <= 0 or window_sec <= 0:
+        return True, None
+    now = time.time()
+    bucket_key = f"{endpoint}:{_client_ip()}"
+    with _RATE_LIMIT_LOCK:
+        bucket = _RATE_LIMIT_BUCKETS[bucket_key]
+        while bucket and (now - bucket[0]) > window_sec:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            retry_after = max(1, int(window_sec - (now - bucket[0])))
+            return False, retry_after
+        bucket.append(now)
+    return True, None
+
+
+def _serialize_user(row) -> dict:
+    return {
+        "id": int(row["id"]),
+        "email": row["email"],
+        "name": row["name"],
+        "role": row["role"],
+    }
+
+
+def _can_edit_reservation(user, reservation) -> bool:
+    if not user or not reservation:
+        return False
+    if user["role"] == "admin":
+        return reservation["status"] not in ("denied", "canceled")
+    return reservation["status"] == "pending" and int(reservation["requested_by_user_id"]) == int(user["id"])
+
+
+def _can_request_change(user, reservation) -> bool:
+    if not user or not reservation:
+        return False
+    if reservation["status"] != "approved":
+        return False
+    if datetime.fromisoformat(reservation["end_utc"]) < _utc_now():
+        return False
+    return user["role"] == "admin" or int(reservation["requested_by_user_id"]) == int(user["id"])
+
+
+def _can_reopen_reservation(user, reservation) -> bool:
+    if not user or not reservation:
+        return False
+    return user["role"] == "admin" and reservation["status"] in ("denied", "canceled")
+
+
+def _reservation_to_event_payload(row, user) -> dict:
+    title = f"{row['traveling_owner_name']} — {row['dep_icao']} → {row['dest_icao']} (Parked: {row['parked_icao']})"
+    return {
+        "id": int(row["id"]),
+        "title": title,
+        "start": _utc_iso_to_local_iso(row["start_utc"]),
+        "end": _utc_iso_to_local_iso(row["end_utc"]),
+        "status": row["status"],
+        "dep_icao": row["dep_icao"],
+        "dest_icao": row["dest_icao"],
+        "parked_icao": row["parked_icao"],
+        "traveling_owner": row["traveling_owner_name"],
+        "notes": row["notes"] or "",
+        "editable": _can_edit_reservation(user, row),
+    }
+
+
+def _reservation_payload(row) -> dict:
+    return {
+        "id": int(row["id"]),
+        "status": row["status"],
+        "start": _utc_iso_to_local_iso(row["start_utc"]),
+        "end": _utc_iso_to_local_iso(row["end_utc"]),
+        "start_display": _utc_iso_to_local_display(row["start_utc"]),
+        "end_display": _utc_iso_to_local_display(row["end_utc"]),
+        "dep_icao": row["dep_icao"],
+        "dest_icao": row["dest_icao"],
+        "parked_icao": row["parked_icao"],
+        "traveling_owner": row["traveling_owner_name"],
+        "requested_by": row["requested_by_name"],
+        "approved_by": row["approved_by_name"] if "approved_by_name" in row.keys() else None,
+        "notes": row["notes"] or "",
+        "created_at": _utc_iso_to_local_iso(row["created_at_utc"]),
+        "updated_at": _utc_iso_to_local_iso(row["updated_at_utc"]),
+        "decision_at": _utc_iso_to_local_iso(row["decision_at_utc"]) if row["decision_at_utc"] else None,
+    }
+
+
+def _resolve_required_airport(raw_code: str | None, field: str):
+    raw = (raw_code or "").strip().upper()
+    if not raw:
+        return None, {"message": f"{field} is required.", "code": f"invalid_{field}", "field": field, "status": 400}
+    if not AIRPORT_CODE_RE.fullmatch(raw):
+        return None, {"message": f"{field} must be a valid airport code.", "code": f"invalid_{field}", "field": field, "status": 400}
+    resolved = _resolve_airport_code(raw)
+    if not resolved:
+        return None, {"message": f"Unknown airport code for {field}: {raw}.", "code": f"unknown_{field}", "field": field, "status": 400}
+    return resolved, None
+
+
+def _validate_reservation_fields(
+    payload: dict,
+    *,
+    existing: dict | None = None,
+    current_user: dict,
+):
+    start_local, start_err = _extract_local_datetime_from_payload(payload, prefix="start")
+    if start_err:
+        return None, start_err
+    end_local, end_err = _extract_local_datetime_from_payload(payload, prefix="end")
+    if end_err:
+        return None, end_err
+
+    if existing and start_local is None:
+        start_dt_local = datetime.fromisoformat(existing["start"]).astimezone(_home_zone())
+    else:
+        start_dt_local = _parse_local_datetime(start_local)
+    if existing and end_local is None:
+        end_dt_local = datetime.fromisoformat(existing["end"]).astimezone(_home_zone())
+    else:
+        end_dt_local = _parse_local_datetime(end_local)
+
+    if not start_dt_local or not end_dt_local:
+        return None, {
+            "message": "Provide start/end as start_local+end_local or as start_date+start_time and end_date+end_time.",
+            "code": "invalid_datetime",
+            "field": "start_date",
+            "status": 400,
+        }
+
+    if (start_dt_local.minute % 15) != 0 or start_dt_local.second != 0:
+        return None, {
+            "message": "Departure time must be in 15-minute increments.",
+            "code": "invalid_time_increment",
+            "field": "start_time",
+            "status": 400,
+        }
+    if (end_dt_local.minute % 15) != 0 or end_dt_local.second != 0:
+        return None, {
+            "message": "Arrival time must be in 15-minute increments.",
+            "code": "invalid_time_increment",
+            "field": "end_time",
+            "status": 400,
+        }
+
+    duration_minutes = int((end_dt_local - start_dt_local).total_seconds() / 60)
+    min_minutes = _effective_reservation_min_minutes()
+    max_days = _effective_reservation_max_days()
+    if duration_minutes < min_minutes:
+        return None, {
+            "message": f"Reservation duration must be at least {min_minutes} minutes.",
+            "code": "invalid_duration",
+            "field": "end_local",
+            "status": 400,
+        }
+    if duration_minutes > (max_days * 24 * 60):
+        return None, {
+            "message": f"Reservation duration cannot exceed {max_days} days.",
+            "code": "duration_too_long",
+            "field": "end_local",
+            "status": 400,
+        }
+
+    dep_value = payload.get("dep_icao", existing["dep_icao"] if existing else None)
+    dest_value = payload.get("dest_icao", existing["dest_icao"] if existing else None)
+    dep, err = _resolve_required_airport(dep_value, "dep_icao")
+    if err:
+        return None, err
+    dest, err = _resolve_required_airport(dest_value, "dest_icao")
+    if err:
+        return None, err
+    # Parked airport is derived from destination for this single-aircraft workflow.
+    parked = dest
+
+    if dep == dest:
+        return None, {"message": "Departure and destination cannot be the same.", "code": "same_airport", "field": "dest_icao", "status": 400}
+
+    traveling_user_id = payload.get("traveling_user_id")
+    if current_user["role"] != "admin":
+        traveling_user_id = current_user["id"]
+    elif traveling_user_id is None and existing:
+        traveling_user_id = existing["traveling_user_id"]
+    elif traveling_user_id is None:
+        traveling_user_id = current_user["id"]
+    try:
+        traveling_user_id = int(traveling_user_id)
+    except Exception:
+        return None, {"message": "traveling_user_id must be an integer.", "code": "invalid_traveling_owner", "field": "traveling_user_id", "status": 400}
+
+    notes = (payload.get("notes") if "notes" in payload else (existing["notes"] if existing else "")) or ""
+    start_utc = _to_utc_iso(start_dt_local)
+    end_utc = _to_utc_iso(end_dt_local)
+
+    return {
+        "start_utc": start_utc,
+        "end_utc": end_utc,
+        "dep_icao": dep,
+        "dest_icao": dest,
+        "parked_icao": parked,
+        "traveling_user_id": traveling_user_id,
+        "notes": notes.strip(),
+    }, None
+
+
+def _bootstrap_admin_if_configured() -> None:
+    if not TBM_BOOTSTRAP_ADMIN_EMAIL or not TBM_BOOTSTRAP_ADMIN_NAME or not TBM_BOOTSTRAP_ADMIN_PASSWORD:
+        logger.info("bootstrap_admin_skipped reason=missing_env")
+        return
+    with _db_conn() as conn:
+        created = storage.ensure_bootstrap_admin(
+            conn,
+            email=TBM_BOOTSTRAP_ADMIN_EMAIL,
+            name=TBM_BOOTSTRAP_ADMIN_NAME,
+            password_hash=hash_password(TBM_BOOTSTRAP_ADMIN_PASSWORD),
+        )
+        if created:
+            logger.info("bootstrap_admin_created email=%s", TBM_BOOTSTRAP_ADMIN_EMAIL)
+
+
+@app.before_request
+def load_current_user():
+    g.request_started_at = time.time()
+    g.request_id = request.headers.get("X-Request-Id") or uuid.uuid4().hex
+    g.current_user = None
+    user_id = session.get("user_id")
+    if not user_id:
+        return
+    try:
+        uid = int(user_id)
+    except Exception:
+        session.pop("user_id", None)
+        return
+    with _db_conn() as conn:
+        row = storage.get_user_by_id(conn, uid)
+    if not row:
+        session.pop("user_id", None)
+        return
+    g.current_user = _serialize_user(row)
+
+
+@app.before_request
+def apply_request_guards():
+    endpoint = (request.endpoint or "")
+    endpoint_key = endpoint.split(".")[-1]
+
+    allowed, retry_after = _enforce_rate_limit(endpoint)
+    if not allowed:
+        response, status = _json_error("Rate limit exceeded. Please retry shortly.", 429, "rate_limited")
+        if retry_after:
+            response.headers["Retry-After"] = str(retry_after)
+        return response, status
+
+    is_mutating = request.method.upper() in ("POST", "PATCH", "PUT", "DELETE")
+    if not is_mutating:
+        return None
+
+    if endpoint_key in CSRF_SAFE_ENDPOINTS:
+        return None
+
+    if endpoint_key == "logout_post":
+        if not _verify_csrf_token():
+            return redirect(url_for("login"))
+        return None
+    if endpoint_key == "login_post":
+        if not _verify_csrf_token():
+            return render_template("login.html", app_name=APP_NAME, error="Session expired. Please try logging in again."), 403
+        return None
+
+    if request.path.startswith("/api/") and getattr(g, "current_user", None):
+        if not _verify_csrf_token():
+            return _json_error("Missing or invalid CSRF token.", 403, "csrf_failed")
+    return None
+
+
+@app.after_request
+def add_response_metadata(response):
+    response.headers["X-Request-Id"] = _request_id()
+    elapsed_ms = None
+    started = getattr(g, "request_started_at", None)
+    if isinstance(started, (int, float)):
+        elapsed_ms = int((time.time() - started) * 1000)
+    logger.info(
+        "request_complete method=%s path=%s endpoint=%s status=%s elapsed_ms=%s request_id=%s",
+        request.method,
+        request.path,
+        request.endpoint,
+        response.status_code,
+        elapsed_ms,
+        _request_id(),
+    )
+    return response
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(exc):
+    from werkzeug.exceptions import HTTPException
+
+    if isinstance(exc, HTTPException):
+        if request.path.startswith("/api/"):
+            return _json_error(exc.description or "Request failed.", exc.code or 500, "http_error")
+        return exc
+
+    logger.exception("unhandled_exception request_id=%s", _request_id())
+    if request.path.startswith("/api/"):
+        return _json_error("Internal server error.", 500, "internal_error")
+    return render_template("home.html", app_name=APP_NAME), 500
+
+
+@app.context_processor
+def inject_template_globals():
+    return {
+        "current_user": getattr(g, "current_user", None),
+        "home_timezone": _effective_home_timezone_name(),
+        "csrf_token": _get_or_create_csrf_token(),
+    }
+
+
 # ------------------ General helpers ------------------
 def _json_error(message: str, status: int = 400, code: str = "bad_request", field: str | None = None):
-    payload = {"error": message, "code": code}
+    payload = {"error": message, "code": code, "request_id": _request_id()}
     if field:
         payload["field"] = field
     return jsonify(payload), status
@@ -1206,6 +1771,313 @@ def estimate_trip(
     }
 
 
+# ------------------ UI/API: auth + reservations ------------------
+app.register_blueprint(
+    create_auth_blueprint(
+        app_name=APP_NAME,
+        db_conn=_db_conn,
+        serialize_user=_serialize_user,
+        json_error=_json_error,
+    )
+)
+app.register_blueprint(
+    create_reservations_blueprint(
+        login_required=login_required,
+        admin_required=admin_required,
+        db_conn=_db_conn,
+        json_error=_json_error,
+        parse_local_datetime=_parse_local_datetime,
+        home_zone=_home_zone,
+        to_utc_iso=_to_utc_iso,
+        utc_iso_to_local_iso=_utc_iso_to_local_iso,
+        effective_home_timezone_name=_effective_home_timezone_name,
+        effective_user_show_closed_default=_effective_user_show_closed_default,
+        reservation_payload=_reservation_payload,
+        reservation_to_event_payload=_reservation_to_event_payload,
+        validate_reservation_fields=_validate_reservation_fields,
+        can_edit_reservation=_can_edit_reservation,
+        can_request_change=_can_request_change,
+        can_reopen_reservation=_can_reopen_reservation,
+        utc_now=_utc_now,
+        default_parked_icao=TBM_DEFAULT_PARKED_ICAO,
+    )
+)
+
+
+@app.get("/calendar")
+@login_required
+def calendar_page():
+    return render_template("calendar.html", app_name=APP_NAME, home_timezone=_effective_home_timezone_name())
+
+
+@app.get("/admin")
+@admin_required
+def admin_page():
+    with _db_conn() as conn:
+        owners = [_serialize_user(row) for row in storage.list_owner_users(conn)]
+    return render_template("admin.html", app_name=APP_NAME, owners=owners, home_timezone=_effective_home_timezone_name())
+
+
+@app.get("/admin/flights")
+@admin_required
+def admin_flights_page():
+    return render_template("admin_flights.html", app_name=APP_NAME, home_timezone=_effective_home_timezone_name())
+
+
+@app.get("/admin/settings")
+@admin_required
+def admin_settings_page():
+    return render_template("admin_settings.html", app_name=APP_NAME, home_timezone=_effective_home_timezone_name())
+
+
+@app.get("/my-flights")
+@login_required
+def my_flights_page():
+    return render_template("my_flights.html", app_name=APP_NAME, home_timezone=_effective_home_timezone_name())
+
+
+@app.get("/api/owners")
+@login_required
+def api_owners():
+    with _db_conn() as conn:
+        owners = [_serialize_user(row) for row in storage.list_owner_users(conn)]
+    return jsonify(owners)
+
+
+@app.post("/api/owners")
+@admin_required
+def api_create_owner():
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "").strip()
+    email = str(data.get("email") or "").strip().lower()
+    password = str(data.get("password") or "")
+    if not name or not email or not password:
+        return _json_error("name, email, and password are required.", 400, "invalid_owner")
+    if len(password) < 8:
+        return _json_error("password must be at least 8 characters.", 400, "weak_password", "password")
+    try:
+        with _db_conn() as conn:
+            owner = storage.create_user(
+                conn,
+                email=email,
+                name=name,
+                role="owner",
+                password_hash=hash_password(password),
+            )
+    except sqlite3.IntegrityError:
+        return _json_error("An account with this email already exists.", 409, "owner_exists", "email")
+    return jsonify({"ok": True, "owner": _serialize_user(owner)}), 201
+
+
+@app.post("/api/owners/<int:user_id>/reset-password")
+@admin_required
+def api_owner_reset_password(user_id: int):
+    data = request.get_json(silent=True) or {}
+    password = str(data.get("password") or "")
+    if len(password) < 8:
+        return _json_error("password must be at least 8 characters.", 400, "weak_password", "password")
+    with _db_conn() as conn:
+        target = storage.get_user_by_id(conn, user_id)
+        if not target:
+            return _json_error("Owner not found.", 404, "not_found")
+        if target["role"] != "owner":
+            return _json_error("Only owner passwords can be reset here.", 400, "invalid_owner")
+        storage.set_user_password(conn, user_id, hash_password(password))
+    return jsonify({"ok": True})
+
+
+@app.get("/api/admin/settings")
+@admin_required
+def api_admin_settings():
+    effective = _load_runtime_settings(force=True)
+    return jsonify(
+        {
+            "settings": effective,
+            "defaults": _default_runtime_settings(),
+        }
+    )
+
+
+@app.patch("/api/admin/settings")
+@admin_required
+def api_admin_settings_patch():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _json_error("Request body must be a JSON object.", 400, "invalid_json")
+
+    allowed = {
+        "home_timezone",
+        "reservation_min_minutes",
+        "reservation_max_days",
+        "admin_flights_default_scope",
+        "user_show_closed_default",
+    }
+    updates: dict[str, str] = {}
+
+    for key, raw_value in data.items():
+        if key not in allowed:
+            return _json_error(f"Unsupported setting: {key}", 400, "invalid_setting", key)
+        value = str(raw_value).strip()
+        if key == "home_timezone":
+            try:
+                ZoneInfo(value)
+            except Exception:
+                return _json_error("home_timezone must be a valid IANA timezone.", 400, "invalid_setting", key)
+        elif key == "reservation_min_minutes":
+            try:
+                parsed = int(value)
+            except Exception:
+                return _json_error("reservation_min_minutes must be an integer.", 400, "invalid_setting", key)
+            if parsed < 1 or parsed > 1440:
+                return _json_error("reservation_min_minutes must be between 1 and 1440.", 400, "invalid_setting", key)
+            value = str(parsed)
+        elif key == "reservation_max_days":
+            try:
+                parsed = int(value)
+            except Exception:
+                return _json_error("reservation_max_days must be an integer.", 400, "invalid_setting", key)
+            if parsed < 1 or parsed > 365:
+                return _json_error("reservation_max_days must be between 1 and 365.", 400, "invalid_setting", key)
+            value = str(parsed)
+        elif key == "admin_flights_default_scope":
+            value = value.lower()
+            if value not in ("future_only", "all"):
+                return _json_error("admin_flights_default_scope must be 'future_only' or 'all'.", 400, "invalid_setting", key)
+        elif key == "user_show_closed_default":
+            value = value.lower()
+            if value not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
+                return _json_error("user_show_closed_default must be a boolean-like value.", 400, "invalid_setting", key)
+            value = "true" if value in ("true", "1", "yes", "on") else "false"
+        updates[key] = value
+
+    if updates:
+        current = _load_runtime_settings(force=True)
+        merged = dict(current)
+        merged.update(updates)
+        try:
+            min_minutes = int(merged["reservation_min_minutes"])
+            max_days = int(merged["reservation_max_days"])
+        except Exception:
+            return _json_error("reservation_min_minutes and reservation_max_days must be integers.", 400, "invalid_setting")
+        if min_minutes >= (max_days * 24 * 60):
+            return _json_error(
+                "reservation_min_minutes must be less than reservation_max_days * 24 * 60.",
+                400,
+                "invalid_setting",
+                "reservation_min_minutes",
+            )
+
+    if not updates:
+        return jsonify({"ok": True, "settings": _load_runtime_settings(force=True)})
+
+    with _db_conn() as conn:
+        storage.upsert_settings_with_audit(conn, updates, updated_by_user_id=int(g.current_user["id"]))
+    _invalidate_settings_cache()
+    return jsonify({"ok": True, "settings": _load_runtime_settings(force=True)})
+
+
+@app.get("/api/admin/settings/history")
+@admin_required
+def api_admin_settings_history():
+    key = (request.args.get("key") or "").strip()
+    page_raw = (request.args.get("page") or "1").strip()
+    page_size_raw = (request.args.get("page_size") or "25").strip()
+    try:
+        page = max(1, int(page_raw))
+    except Exception:
+        return _json_error("page must be an integer.", 400, "invalid_page", "page")
+    try:
+        page_size = max(1, min(100, int(page_size_raw)))
+    except Exception:
+        return _json_error("page_size must be an integer.", 400, "invalid_page_size", "page_size")
+
+    with _db_conn() as conn:
+        result = storage.list_settings_audit_history(conn, key=key or None, page=page, page_size=page_size)
+
+    rows = []
+    for row in result["rows"]:
+        rows.append(
+            {
+                "id": int(row["id"]),
+                "key": row["key"],
+                "old_value": row["old_value"],
+                "new_value": row["new_value"],
+                "changed_by_user_id": int(row["changed_by_user_id"]) if row["changed_by_user_id"] is not None else None,
+                "changed_by": row["changed_by_name"] or row["changed_by_email"] or "Unknown",
+                "changed_at": _utc_iso_to_local_iso(row["changed_at_utc"]),
+            }
+        )
+    return jsonify({"items": rows, "total": int(result["total"]), "page": page, "page_size": page_size})
+
+
+@app.get("/api/admin/flights")
+@admin_required
+def api_admin_flights():
+    status = (request.args.get("status") or "all").strip().lower()
+    owner_id_raw = (request.args.get("owner_id") or "").strip()
+    requested_by_id_raw = (request.args.get("requested_by_id") or "").strip()
+    query = (request.args.get("q") or "").strip()
+    from_raw = (request.args.get("from") or "").strip()
+    to_raw = (request.args.get("to") or "").strip()
+    page_raw = (request.args.get("page") or "1").strip()
+    page_size_raw = (request.args.get("page_size") or "25").strip()
+
+    try:
+        page = max(1, int(page_raw))
+    except Exception:
+        return _json_error("page must be an integer.", 400, "invalid_page", "page")
+    try:
+        page_size = int(page_size_raw)
+    except Exception:
+        return _json_error("page_size must be an integer.", 400, "invalid_page_size", "page_size")
+    page_size = max(1, min(page_size, 100))
+
+    owner_id = None
+    if owner_id_raw:
+        try:
+            owner_id = int(owner_id_raw)
+        except Exception:
+            return _json_error("owner_id must be an integer.", 400, "invalid_owner", "owner_id")
+    requested_by_id = None
+    if requested_by_id_raw:
+        try:
+            requested_by_id = int(requested_by_id_raw)
+        except Exception:
+            return _json_error("requested_by_id must be an integer.", 400, "invalid_owner", "requested_by_id")
+
+    from_utc = None
+    to_utc = None
+    if from_raw:
+        parsed = _parse_local_datetime(from_raw)
+        if not parsed:
+            return _json_error("Invalid from value.", 400, "invalid_range", "from")
+        from_utc = _to_utc_iso(parsed)
+    if to_raw:
+        parsed = _parse_local_datetime(to_raw)
+        if not parsed:
+            return _json_error("Invalid to value.", 400, "invalid_range", "to")
+        to_utc = _to_utc_iso(parsed)
+    if not from_utc and not from_raw and _effective_admin_flights_default_scope() == "future_only":
+        from_utc = _to_utc_iso(datetime.now(_home_zone()))
+
+    with _db_conn() as conn:
+        result = storage.list_admin_flights(
+            conn,
+            status=status,
+            from_utc=from_utc,
+            to_utc=to_utc,
+            owner_id=owner_id,
+            requested_by_id=requested_by_id,
+            query=query or None,
+            page=page,
+            page_size=page_size,
+        )
+    rows = [_reservation_payload(row) for row in result["rows"]]
+    return jsonify({"items": rows, "total": int(result["total"]), "page": page, "page_size": page_size})
+
+
+
+
 # ------------------ API: airports search ------------------
 @app.get("/api/airports")
 def api_airports():
@@ -1352,6 +2224,61 @@ def api_estimate():
     return jsonify(est)
 
 
+def _extract_trip_from_message(message: str):
+    text = (message or "").strip()
+    m = re.search(r"\b([A-Za-z0-9]{3,4})\s+to\s+([A-Za-z0-9]{3,4})\b", text, flags=re.IGNORECASE)
+    if not m:
+        return None
+    dep_raw, dest_raw = m.group(1).upper(), m.group(2).upper()
+    dep = _resolve_airport_code(dep_raw)
+    dest = _resolve_airport_code(dest_raw)
+    if not dep or not dest or dep == dest:
+        return None
+    when = parse_date_only(text) or (date.today() + timedelta(days=1))
+    return dep, dest, when
+
+
+@app.post("/api/chat")
+def api_chat():
+    data = request.get_json(silent=True) or {}
+    message = str(data.get("message") or "").strip()
+    if not message:
+        return jsonify({"reply": "Please send a message.", "parsed": {}})
+    parsed = _extract_trip_from_message(message)
+    lower = message.lower()
+    if not parsed:
+        return jsonify(
+            {
+                "reply": "I still need departure airport, destination airport, and a date (e.g. 'KCAK to KSRQ tomorrow').",
+                "parsed": {},
+            }
+        )
+    dep, dest, depart = parsed
+    est = estimate_trip(dep=dep, dest=dest, trip_type="oneway", depart_date=depart, return_date=None, assumptions=None)
+    leg = est["legs"][0]
+    if "email" in lower or "draft" in lower:
+        reply = (
+            f"Subject: TBM trip estimate {dep} to {dest} on {depart.isoformat()}\\n\\n"
+            "Hi team,\\n\\n"
+            f"For {dep} to {dest}, typical block time is {leg['typical']['block_time']} with estimated total {money(float(leg['typical']['costs']['total']))}.\\n"
+            f"Conservative block time is {leg['conservative']['block_time']} with estimated total {money(float(leg['conservative']['costs']['total']))}.\\n\\n"
+            "Best,\\nTBM Planner"
+        )
+    else:
+        reply = (
+            "Trip summary:\\n"
+            f"{dep} to {dest} on {depart.isoformat()}\\n"
+            f"Typical: {leg['typical']['block_time']} and {money(float(leg['typical']['costs']['total']))}\\n"
+            f"Conservative: {leg['conservative']['block_time']} and {money(float(leg['conservative']['costs']['total']))}"
+        )
+    return jsonify(
+        {
+            "reply": reply,
+            "parsed": {"dep": dep, "dest": dest, "depart_date": depart.isoformat()},
+        }
+    )
+
+
 # ------------------ UI: pages ------------------
 @app.get("/")
 def home():
@@ -1461,12 +2388,64 @@ def health():
         {
             "status": "ok",
             "app": APP_NAME,
-            "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            "timestamp_utc": datetime.now(ZoneInfo("UTC")).isoformat(),
             "winds_cache_keys": len(_WINDTEMP_CACHE),
         }
     )
 
 
+@app.get("/api/admin/system-metrics")
+@admin_required
+def api_admin_system_metrics():
+    db_exists = os.path.exists(TBM_DB_PATH)
+    db_size_bytes = os.path.getsize(TBM_DB_PATH) if db_exists else 0
+    db_user_version = 0
+    if db_exists:
+        with storage.get_conn(TBM_DB_PATH) as conn:
+            db_user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    return jsonify(
+        {
+            "app": APP_NAME,
+            "env": APP_ENV,
+            "request_id": _request_id(),
+            "db": {
+                "path": TBM_DB_PATH,
+                "exists": db_exists,
+                "size_bytes": db_size_bytes,
+                "user_version": db_user_version,
+            },
+            "caches": {
+                "settings_cache_keys": len(_SETTINGS_CACHE),
+                "winds_cache_keys": len(_WINDTEMP_CACHE),
+                "geocode_cache_keys": len(_GEOCODE_CACHE),
+            },
+            "uptime_sec": int(time.time() - START_TIME_EPOCH),
+        }
+    )
+
+
+def _startup_safety_checks() -> None:
+    secret = app.config.get("SECRET_KEY") or ""
+    if IS_PRODUCTION:
+        if not secret or secret == "dev-change-me":
+            raise RuntimeError("FLASK_SECRET_KEY must be set to a strong value in production.")
+        db_dir = os.path.dirname(TBM_DB_PATH) or "."
+        if not os.path.isdir(db_dir):
+            raise RuntimeError(f"TBM_DB_PATH directory does not exist: {db_dir}")
+    elif secret == "dev-change-me":
+        logger.warning("using_default_dev_secret_key env=%s", APP_ENV)
+
+
+START_TIME_EPOCH = time.time()
+_startup_safety_checks()
+storage.init_db(TBM_DB_PATH)
+with storage.get_conn(TBM_DB_PATH) as _conn:
+    storage.seed_settings_defaults(_conn, _default_runtime_settings())
+_invalidate_settings_cache()
+_bootstrap_admin_if_configured()
+
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5050"))
-    app.run(debug=True, port=port, use_reloader=True)
+    debug_enabled = (os.getenv("FLASK_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
+    app.run(debug=debug_enabled, port=port, use_reloader=debug_enabled)
