@@ -118,9 +118,12 @@ AIRPORT_META_CACHE_MAX_KEYS = _env_int("AIRPORT_META_CACHE_MAX_KEYS", 512)
 FLIGHTAWARE_AEROAPI_KEY = (os.getenv("FLIGHTAWARE_AEROAPI_KEY") or "").strip()
 FLIGHTAWARE_AEROAPI_BASE = (os.getenv("FLIGHTAWARE_AEROAPI_BASE") or "https://aeroapi.flightaware.com/aeroapi").rstrip("/")
 FLIGHTAWARE_API_TIMEOUT_SEC = _env_int("FLIGHTAWARE_API_TIMEOUT_SEC", 8)
-FLIGHTAWARE_CACHE_TTL_SEC = _env_int("FLIGHTAWARE_CACHE_TTL_SEC", 20)
+FLIGHTAWARE_CACHE_TTL_SEC = _env_int("FLIGHTAWARE_CACHE_TTL_SEC", 75)
+FLIGHTAWARE_TRACK_REFRESH_SEC = _env_int("FLIGHTAWARE_TRACK_REFRESH_SEC", 300)
 LIVE_TRACKING_TAIL = (os.getenv("LIVE_TRACKING_TAIL") or "N656W").strip().upper()
 LIVE_TRACKING_MATCH_WINDOW_HOURS = _env_int("LIVE_TRACKING_MATCH_WINDOW_HOURS", 6)
+LIVE_TRACKING_ACTIVE_POLL_MS = _env_int("LIVE_TRACKING_ACTIVE_POLL_MS", 60000)
+LIVE_TRACKING_IDLE_POLL_MS = _env_int("LIVE_TRACKING_IDLE_POLL_MS", 300000)
 TBM_DB_PATH = os.getenv("TBM_DB_PATH", os.path.join(BASE_DIR, "tbm.sqlite3"))
 TBM_HOME_TZ = os.getenv("TBM_HOME_TZ", "America/New_York")
 TBM_DEFAULT_PARKED_ICAO = (os.getenv("TBM_DEFAULT_PARKED_ICAO") or "").strip().upper()
@@ -165,6 +168,8 @@ _AIRPORT_META_CACHE: dict[str, tuple[float, dict]] = {}
 _AIRPORT_META_CACHE_LOCK = Lock()
 _LIVE_TRACKING_CACHE: dict[str, tuple[float, dict]] = {}
 _LIVE_TRACKING_CACHE_LOCK = Lock()
+_LIVE_TRACKING_TRACK_CACHE: dict[str, tuple[float, dict]] = {}
+_LIVE_TRACKING_TRACK_CACHE_LOCK = Lock()
 _SETTINGS_CACHE: dict[str, str] = {}
 _SETTINGS_CACHE_AT = 0.0
 _SETTINGS_CACHE_LOCK = Lock()
@@ -1361,6 +1366,10 @@ def _live_tracking_payload_for_tail(tail_number: str) -> dict:
             "reservation_match": "none",
             "reservation_context": None,
             "warnings": ["AeroAPI key is not configured."],
+            "polling": {
+                "active_ms": max(10000, LIVE_TRACKING_ACTIVE_POLL_MS),
+                "idle_ms": max(30000, LIVE_TRACKING_IDLE_POLL_MS),
+            },
         }
         with _LIVE_TRACKING_CACHE_LOCK:
             _LIVE_TRACKING_CACHE[tail] = (now, dict(payload))
@@ -1376,11 +1385,20 @@ def _live_tracking_payload_for_tail(tail_number: str) -> dict:
         if primary:
             fa_flight_id = _first_present(primary, ("fa_flight_id", "flight_id"))
             if fa_flight_id:
+                with _LIVE_TRACKING_TRACK_CACHE_LOCK:
+                    cached_track = _LIVE_TRACKING_TRACK_CACHE.get(tail)
+                if cached_track and (time.time() - cached_track[0]) <= max(30, FLIGHTAWARE_TRACK_REFRESH_SEC):
+                    track_payload = dict(cached_track[1])
                 try:
-                    track_payload = _flightaware_get(f"flights/{urllib.parse.quote(str(fa_flight_id))}/track", {"max_pages": 1})
+                    if track_payload is None:
+                        track_payload = _flightaware_get(f"flights/{urllib.parse.quote(str(fa_flight_id))}/track", {"max_pages": 1})
+                        with _LIVE_TRACKING_TRACK_CACHE_LOCK:
+                            _LIVE_TRACKING_TRACK_CACHE[tail] = (time.time(), dict(track_payload))
                 except Exception:
                     logger.exception("flightaware_track_fetch_failed tail=%s", tail)
-                    warnings.append("Track data unavailable.")
+                    warnings.append("Track data unavailable; using last cached track if present.")
+                    if cached_track:
+                        track_payload = dict(cached_track[1])
         snapshot = _flightaware_snapshot_from_payload(tail, flights_payload, track_payload, prior_snapshot)
         if not primary:
             warnings.append("No active or recent flight data was returned by AeroAPI.")
@@ -1429,6 +1447,10 @@ def _live_tracking_payload_for_tail(tail_number: str) -> dict:
         "reservation_match": reservation_match,
         "reservation_context": reservation_context,
         "warnings": warnings,
+        "polling": {
+            "active_ms": max(10000, LIVE_TRACKING_ACTIVE_POLL_MS),
+            "idle_ms": max(30000, LIVE_TRACKING_IDLE_POLL_MS),
+        },
     }
     with _LIVE_TRACKING_CACHE_LOCK:
         # Keep cache bounded by evicting stale entries first.
@@ -2596,6 +2618,8 @@ def live_tracking_page():
         app_name=APP_NAME,
         home_timezone=_effective_home_timezone_name(),
         live_tracking_tail=LIVE_TRACKING_TAIL,
+        live_tracking_active_poll_ms=max(10000, LIVE_TRACKING_ACTIVE_POLL_MS),
+        live_tracking_idle_poll_ms=max(30000, LIVE_TRACKING_IDLE_POLL_MS),
     )
 
 
@@ -3532,6 +3556,7 @@ def health():
             "timestamp_utc": datetime.now(ZoneInfo("UTC")).isoformat(),
             "winds_cache_keys": len(_WINDTEMP_CACHE),
             "live_tracking_cache_keys": len(_LIVE_TRACKING_CACHE),
+            "live_tracking_track_cache_keys": len(_LIVE_TRACKING_TRACK_CACHE),
         }
     )
 
@@ -3561,6 +3586,7 @@ def api_admin_system_metrics():
                 "winds_cache_keys": len(_WINDTEMP_CACHE),
                 "geocode_cache_keys": len(_GEOCODE_CACHE),
                 "live_tracking_cache_keys": len(_LIVE_TRACKING_CACHE),
+                "live_tracking_track_cache_keys": len(_LIVE_TRACKING_TRACK_CACHE),
             },
             "uptime_sec": int(time.time() - START_TIME_EPOCH),
         }

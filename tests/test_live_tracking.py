@@ -37,7 +37,8 @@ def live_env(tmp_path, monkeypatch):
     monkeypatch.setattr(tbm_app, "TBM_DB_PATH", str(db_path))
     monkeypatch.setattr(tbm_app, "TBM_HOME_TZ", "America/New_York")
     monkeypatch.setattr(tbm_app, "LIVE_TRACKING_TAIL", "N656W")
-    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_CACHE_TTL_SEC", 20)
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_CACHE_TTL_SEC", 75)
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_TRACK_REFRESH_SEC", 300)
     storage.init_db(str(db_path))
     with storage.get_conn(str(db_path)) as conn:
         storage.create_user(
@@ -55,6 +56,7 @@ def live_env(tmp_path, monkeypatch):
             password_hash=hash_password("ownerpass123"),
         )
     tbm_app._LIVE_TRACKING_CACHE.clear()
+    tbm_app._LIVE_TRACKING_TRACK_CACHE.clear()
     return str(db_path)
 
 
@@ -139,6 +141,8 @@ def test_live_tracking_api_fallback_without_api_key(live_env, monkeypatch):
     assert data["provider_mode"] == "fallback"
     assert data["snapshot"]["tail_number"] == "N656W"
     assert data["flightaware_url"].endswith("/N656W")
+    assert int(data["polling"]["active_ms"]) >= 10000
+    assert int(data["polling"]["idle_ms"]) >= 30000
 
 
 def test_live_tracking_api_uses_aeroapi_and_cache(live_env, monkeypatch):
@@ -187,6 +191,35 @@ def test_live_tracking_api_provider_failure_falls_back(live_env, monkeypatch):
     assert data["provider_mode"] == "fallback"
     assert data["snapshot"]["status"] == "unknown"
     assert data["warnings"]
+    assert "polling" in data
+
+
+def test_live_tracking_track_call_is_throttled_by_track_refresh_window(live_env, monkeypatch):
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_AEROAPI_KEY", "test-key")
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_CACHE_TTL_SEC", 0)
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_TRACK_REFRESH_SEC", 300)
+    tbm_app._LIVE_TRACKING_CACHE.clear()
+    tbm_app._LIVE_TRACKING_TRACK_CACHE.clear()
+
+    calls = {"flights": 0, "track": 0}
+
+    def fake_get(path, params=None):  # noqa: ARG001
+        if path.startswith("flights/N656W-123/track"):
+            calls["track"] += 1
+            return _sample_track_payload()
+        calls["flights"] += 1
+        return _sample_flight_payload()
+
+    monkeypatch.setattr(tbm_app, "_flightaware_get", fake_get)
+
+    client = tbm_app.app.test_client()
+    assert _login(client, "owner@example.com", "ownerpass123").status_code == 200
+    first = client.get("/api/live-tracking")
+    second = client.get("/api/live-tracking")
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls["flights"] == 2
+    assert calls["track"] == 1
 
 
 def test_live_tracking_api_matches_approved_reservation(live_env, monkeypatch):

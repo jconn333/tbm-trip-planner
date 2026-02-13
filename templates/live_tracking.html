@@ -147,7 +147,7 @@
     <div class="liveHeader">
       <div>
         <h2 class="liveTitle">Live Tracking: {{ live_tracking_tail }}</h2>
-        <p class="liveSubtle">Auto-refreshes every 30s when active, 120s when hidden.</p>
+        <p class="liveSubtle">Auto-refresh cadence is plan-safe by default and slows when tab is hidden.</p>
       </div>
       <span id="statusBadge" class="statusBadge unknown">Unknown</span>
     </div>
@@ -206,8 +206,8 @@
 
 <script>
 (() => {
-  const ACTIVE_MS = 30_000;
-  const IDLE_MS = 120_000;
+  let ACTIVE_MS = Number({{ live_tracking_active_poll_ms|int }}) || 60_000;
+  let IDLE_MS = Number({{ live_tracking_idle_poll_ms|int }}) || 300_000;
   const el = {
     statusBadge: document.getElementById('statusBadge'),
     providerMode: document.getElementById('providerMode'),
@@ -300,6 +300,12 @@
   }
 
   function render(data){
+    const polling = data.polling || {};
+    const activeMs = Number(polling.active_ms);
+    const idleMs = Number(polling.idle_ms);
+    if(Number.isFinite(activeMs) && activeMs >= 10_000) ACTIVE_MS = activeMs;
+    if(Number.isFinite(idleMs) && idleMs >= 30_000) IDLE_MS = idleMs;
+
     const snapshot = data.snapshot || {};
     const status = String(snapshot.status || 'unknown').toLowerCase();
     el.statusBadge.className = `statusBadge ${status}`;
