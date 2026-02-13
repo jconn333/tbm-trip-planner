@@ -117,6 +117,7 @@
             <a href="/calendar" class="{% if _path.startswith('/calendar') %}active{% endif %}" aria-current="{% if _path.startswith('/calendar') %}page{% endif %}">Calendar</a>
             {% if current_user %}
               <a href="/my-flights" class="{% if _path.startswith('/my-flights') %}active{% endif %}" aria-current="{% if _path.startswith('/my-flights') %}page{% endif %}">My Flights</a>
+              <a href="/live-tracking" class="{% if _path.startswith('/live-tracking') %}active{% endif %}" aria-current="{% if _path.startswith('/live-tracking') %}page{% endif %}">Live</a>
             {% endif %}
 
             {% if current_user and current_user.role == 'admin' %}
@@ -168,6 +169,7 @@
             <a href="/calendar" class="mobileNavLink {% if _path.startswith('/calendar') %}active{% endif %}" aria-current="{% if _path.startswith('/calendar') %}page{% endif %}">Calendar</a>
             {% if current_user %}
               <a href="/my-flights" class="mobileNavLink {% if _path.startswith('/my-flights') %}active{% endif %}" aria-current="{% if _path.startswith('/my-flights') %}page{% endif %}">My Flights</a>
+              <a href="/live-tracking" class="mobileNavLink {% if _path.startswith('/live-tracking') %}active{% endif %}" aria-current="{% if _path.startswith('/live-tracking') %}page{% endif %}">Live</a>
             {% endif %}
             {% if current_user and current_user.role == 'admin' %}
               <div class="mobileAdminSection" id="mobileAdminSection">

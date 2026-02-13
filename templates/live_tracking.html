@@ -1,0 +1,368 @@
+{% extends "base.html" %}
+{% block title %}Live Tracking · {{ app_name }}{% endblock %}
+{% block header_subtitle %}Live aircraft status for {{ live_tracking_tail }} ({{ home_timezone }}).{% endblock %}
+{% block page_styles %}
+.liveGrid{
+  display:grid;
+  grid-template-columns:minmax(0,1.45fr) minmax(280px,0.9fr);
+  gap:16px;
+}
+.liveCard{
+  border:1px solid color-mix(in srgb, var(--color-border) 88%, white);
+  background:var(--color-surface);
+  border-radius:16px;
+  box-shadow:var(--color-shadow-soft);
+  padding:16px;
+}
+.liveHeader{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.liveTitle{
+  margin:0;
+  font-size:1.25rem;
+}
+.liveSubtle{
+  margin:6px 0 0;
+  color:var(--color-muted);
+  font-size:12.5px;
+}
+.statusBadge{
+  display:inline-flex;
+  align-items:center;
+  border-radius:999px;
+  border:1px solid color-mix(in srgb, var(--color-border) 86%, white);
+  padding:4px 10px;
+  font-size:11.5px;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  font-weight:700;
+}
+.statusBadge.en_route{
+  background:color-mix(in srgb, #dff6e8 80%, white);
+  border-color:#9ed8b4;
+}
+.statusBadge.on_ground{
+  background:color-mix(in srgb, #f3f5f8 82%, white);
+  border-color:#c8d1dc;
+}
+.statusBadge.arrived{
+  background:color-mix(in srgb, #e9f7d8 78%, white);
+  border-color:#b7d995;
+}
+.statusBadge.unknown{
+  background:color-mix(in srgb, #f6f0e8 82%, white);
+  border-color:#dbcaae;
+}
+.liveMetaGrid{
+  margin-top:12px;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+}
+.metaBlock{
+  border:1px solid color-mix(in srgb, var(--color-border) 90%, white);
+  border-radius:12px;
+  background:color-mix(in srgb, var(--color-surface-soft) 76%, white);
+  padding:10px;
+}
+.metaLabel{
+  margin:0;
+  font-size:11px;
+  letter-spacing:.03em;
+  text-transform:uppercase;
+  color:var(--color-muted);
+}
+.metaValue{
+  margin:6px 0 0;
+  font-size:14px;
+  font-weight:700;
+  color:var(--color-text-strong);
+}
+.timelineList,
+.trackList,
+.warningList{
+  margin:10px 0 0;
+  padding-left:18px;
+  display:grid;
+  gap:8px;
+}
+.timelineList li,
+.trackList li{
+  font-size:13px;
+}
+.quiet{
+  color:var(--color-muted);
+  font-size:12.5px;
+}
+.warnPanel{
+  border:1px solid #e5c8a2;
+  border-radius:12px;
+  background:#fff6ea;
+  padding:10px 12px;
+  margin-top:12px;
+}
+.liveActions{
+  margin-top:12px;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.providerPill{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  color:var(--color-muted);
+}
+.providerDot{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#8eb4d9;
+}
+.providerDot.fallback{ background:#cc8f44; }
+.errorBox{
+  margin-top:12px;
+  border:1px solid #e2acb3;
+  background:#fff1f3;
+  border-radius:10px;
+  padding:10px 12px;
+  color:#782532;
+  font-size:13px;
+}
+@media (max-width:980px){
+  .liveGrid{ grid-template-columns:1fr; }
+  .liveMetaGrid{ grid-template-columns:1fr; }
+}
+{% endblock %}
+{% block content %}
+<section class="liveGrid">
+  <article class="liveCard">
+    <div class="liveHeader">
+      <div>
+        <h2 class="liveTitle">Live Tracking: {{ live_tracking_tail }}</h2>
+        <p class="liveSubtle">Auto-refreshes every 30s when active, 120s when hidden.</p>
+      </div>
+      <span id="statusBadge" class="statusBadge unknown">Unknown</span>
+    </div>
+    <p class="liveSubtle">
+      <span class="providerPill"><span id="providerDot" class="providerDot"></span><span id="providerMode">Loading…</span></span>
+      <span>• Last updated: <strong id="asOfValue">-</strong></span>
+    </p>
+
+    <div class="liveMetaGrid">
+      <div class="metaBlock">
+        <p class="metaLabel">Route</p>
+        <p class="metaValue" id="routeValue">-</p>
+      </div>
+      <div class="metaBlock">
+        <p class="metaLabel">Position</p>
+        <p class="metaValue" id="positionValue">-</p>
+      </div>
+      <div class="metaBlock">
+        <p class="metaLabel">Speed / Altitude</p>
+        <p class="metaValue" id="speedAltValue">-</p>
+      </div>
+      <div class="metaBlock">
+        <p class="metaLabel">ETA Confidence</p>
+        <p class="metaValue" id="etaValue">Unknown</p>
+      </div>
+    </div>
+
+    <h3>Timeline</h3>
+    <ul id="timelineList" class="timelineList">
+      <li class="quiet">Waiting for data…</li>
+    </ul>
+    <div id="errorBox" class="errorBox" hidden></div>
+  </article>
+
+  <aside class="liveCard">
+    <h3>Recent Track Points</h3>
+    <ul id="trackList" class="trackList">
+      <li class="quiet">Waiting for data…</li>
+    </ul>
+
+    <h3>Reservation Match</h3>
+    <p class="metaValue" id="matchStatusValue">Unknown</p>
+    <p class="quiet" id="matchContextValue">Waiting for data…</p>
+
+    <div id="warningsPanel" class="warnPanel" hidden>
+      <strong>Warnings</strong>
+      <ul id="warningList" class="warningList"></ul>
+    </div>
+
+    <div class="liveActions">
+      <a id="openFlightAwareBtn" class="btn btnPrimary" href="https://www.flightaware.com/live/flight/{{ live_tracking_tail }}" target="_blank" rel="noopener">Open in FlightAware</a>
+      <button id="refreshNowBtn" class="btn" type="button">Refresh now</button>
+    </div>
+  </aside>
+</section>
+
+<script>
+(() => {
+  const ACTIVE_MS = 30_000;
+  const IDLE_MS = 120_000;
+  const el = {
+    statusBadge: document.getElementById('statusBadge'),
+    providerMode: document.getElementById('providerMode'),
+    providerDot: document.getElementById('providerDot'),
+    asOfValue: document.getElementById('asOfValue'),
+    routeValue: document.getElementById('routeValue'),
+    positionValue: document.getElementById('positionValue'),
+    speedAltValue: document.getElementById('speedAltValue'),
+    etaValue: document.getElementById('etaValue'),
+    timelineList: document.getElementById('timelineList'),
+    trackList: document.getElementById('trackList'),
+    matchStatusValue: document.getElementById('matchStatusValue'),
+    matchContextValue: document.getElementById('matchContextValue'),
+    warningsPanel: document.getElementById('warningsPanel'),
+    warningList: document.getElementById('warningList'),
+    openFlightAwareBtn: document.getElementById('openFlightAwareBtn'),
+    refreshNowBtn: document.getElementById('refreshNowBtn'),
+    errorBox: document.getElementById('errorBox'),
+  };
+  let timer = null;
+
+  function fmtTime(value){
+    if(!value) return '-';
+    const dt = new Date(value);
+    if(Number.isNaN(dt.getTime())) return '-';
+    return dt.toLocaleString();
+  }
+
+  function fmtStatus(raw){
+    const key = String(raw || 'unknown').toLowerCase();
+    if(key === 'on_ground') return 'On Ground';
+    if(key === 'en_route') return 'En Route';
+    if(key === 'arrived') return 'Arrived';
+    return 'Unknown';
+  }
+
+  function setError(message){
+    el.errorBox.hidden = !message;
+    el.errorBox.textContent = message || '';
+  }
+
+  function renderTimeline(items){
+    if(!Array.isArray(items) || !items.length){
+      el.timelineList.innerHTML = '<li class="quiet">No recent timeline events.</li>';
+      return;
+    }
+    el.timelineList.innerHTML = items.map((item) => {
+      const label = item.label || item.type || 'Event';
+      return `<li><strong>${label}</strong> · ${fmtTime(item.time_utc)}</li>`;
+    }).join('');
+  }
+
+  function renderTrack(items){
+    if(!Array.isArray(items) || !items.length){
+      el.trackList.innerHTML = '<li class="quiet">No recent track points.</li>';
+      return;
+    }
+    el.trackList.innerHTML = items.slice(0, 10).map((item) => {
+      const lat = Number(item.lat).toFixed(3);
+      const lon = Number(item.lon).toFixed(3);
+      const gs = item.groundspeed_kts != null ? `${item.groundspeed_kts} kt` : '-';
+      const alt = item.altitude_ft != null ? `${item.altitude_ft} ft` : '-';
+      return `<li>${fmtTime(item.time_utc)} · ${lat}, ${lon} · ${gs} · ${alt}</li>`;
+    }).join('');
+  }
+
+  function renderWarnings(items){
+    if(!Array.isArray(items) || !items.length){
+      el.warningsPanel.hidden = true;
+      el.warningList.innerHTML = '';
+      return;
+    }
+    el.warningsPanel.hidden = false;
+    el.warningList.innerHTML = items.map((msg) => `<li>${msg}</li>`).join('');
+  }
+
+  function renderMatch(mode, ctx){
+    if(mode === 'matched' && ctx){
+      el.matchStatusValue.textContent = 'Matched to approved reservation';
+      el.matchContextValue.textContent = `#${ctx.reservation_id} · ${ctx.dep_icao} → ${ctx.dest_icao} · ${ctx.start_display} to ${ctx.end_display} · Owner: ${ctx.traveling_owner}`;
+      return;
+    }
+    if(mode === 'mismatch'){
+      el.matchStatusValue.textContent = 'Possible mismatch';
+      el.matchContextValue.textContent = 'Live movement detected without a clear approved reservation match.';
+      return;
+    }
+    el.matchStatusValue.textContent = 'No match';
+    el.matchContextValue.textContent = 'No approved reservation match found for current route/time.';
+  }
+
+  function render(data){
+    const snapshot = data.snapshot || {};
+    const status = String(snapshot.status || 'unknown').toLowerCase();
+    el.statusBadge.className = `statusBadge ${status}`;
+    el.statusBadge.textContent = fmtStatus(status);
+    el.providerMode.textContent = data.provider_mode === 'aeroapi' ? 'AeroAPI' : 'Fallback';
+    el.providerDot.className = `providerDot ${data.provider_mode === 'fallback' ? 'fallback' : ''}`;
+    el.asOfValue.textContent = fmtTime(data.as_of);
+
+    const origin = snapshot.origin || '—';
+    const destination = snapshot.destination || '—';
+    const ident = snapshot.ident || snapshot.tail_number || 'N/A';
+    el.routeValue.textContent = `${ident} · ${origin} → ${destination}`;
+
+    if(snapshot.latitude != null && snapshot.longitude != null){
+      el.positionValue.textContent = `${Number(snapshot.latitude).toFixed(3)}, ${Number(snapshot.longitude).toFixed(3)} (${fmtTime(snapshot.last_position_time_utc)})`;
+    } else {
+      el.positionValue.textContent = 'Unavailable';
+    }
+    const gs = snapshot.groundspeed_kts != null ? `${snapshot.groundspeed_kts} kt` : '-';
+    const alt = snapshot.altitude_ft != null ? `${snapshot.altitude_ft} ft` : '-';
+    el.speedAltValue.textContent = `${gs} / ${alt}`;
+
+    const etaConfidence = snapshot.eta_confidence || 'unknown';
+    const etaDelta = snapshot.eta_delta_minutes;
+    const etaSuffix = Number.isFinite(etaDelta) ? ` (${etaDelta >= 0 ? '+' : ''}${etaDelta} min)` : '';
+    el.etaValue.textContent = `${etaConfidence.charAt(0).toUpperCase()}${etaConfidence.slice(1)}${etaSuffix}`;
+
+    el.openFlightAwareBtn.href = data.flightaware_url || el.openFlightAwareBtn.href;
+    renderTimeline(snapshot.events);
+    renderTrack(snapshot.track_points);
+    renderMatch(data.reservation_match, data.reservation_context);
+    renderWarnings(data.warnings);
+  }
+
+  async function loadLive(){
+    try{
+      setError('');
+      const resp = await fetch('/api/live-tracking');
+      if(!resp.ok){
+        throw new Error(`Live tracking request failed (${resp.status})`);
+      }
+      render(await resp.json());
+    } catch (err){
+      setError(err && err.message ? err.message : 'Failed to load live tracking.');
+    }
+  }
+
+  function scheduleNextPoll(){
+    if(timer) window.clearTimeout(timer);
+    const delay = document.visibilityState === 'hidden' ? IDLE_MS : ACTIVE_MS;
+    timer = window.setTimeout(async () => {
+      await loadLive();
+      scheduleNextPoll();
+    }, delay);
+  }
+
+  document.addEventListener('visibilitychange', scheduleNextPoll);
+  el.refreshNowBtn.addEventListener('click', async () => {
+    await loadLive();
+    scheduleNextPoll();
+  });
+
+  loadLive().then(scheduleNextPoll);
+})();
+</script>
+{% endblock %}

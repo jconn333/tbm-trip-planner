@@ -1,0 +1,235 @@
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+import pytest
+
+import app as tbm_app
+import db as storage
+from auth import hash_password
+
+
+def _attach_csrf_headers(client):
+    for method_name in ("post", "patch", "put", "delete"):
+        original = getattr(client, method_name)
+
+        def wrapped(*args, _original=original, **kwargs):
+            headers = dict(kwargs.pop("headers", {}) or {})
+            with client.session_transaction() as sess:
+                token = sess.get("csrf_token")
+            if token:
+                headers.setdefault("X-CSRF-Token", token)
+            kwargs["headers"] = headers
+            return _original(*args, **kwargs)
+
+        setattr(client, method_name, wrapped)
+
+
+def _login(client, email: str, password: str):
+    response = client.post("/api/login", json={"email": email, "password": password})
+    if response.status_code == 200:
+        _attach_csrf_headers(client)
+    return response
+
+
+@pytest.fixture
+def live_env(tmp_path, monkeypatch):
+    db_path = tmp_path / "test_live_tracking.sqlite3"
+    monkeypatch.setattr(tbm_app, "TBM_DB_PATH", str(db_path))
+    monkeypatch.setattr(tbm_app, "TBM_HOME_TZ", "America/New_York")
+    monkeypatch.setattr(tbm_app, "LIVE_TRACKING_TAIL", "N656W")
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_CACHE_TTL_SEC", 20)
+    storage.init_db(str(db_path))
+    with storage.get_conn(str(db_path)) as conn:
+        storage.create_user(
+            conn,
+            email="admin@example.com",
+            name="Admin",
+            role="admin",
+            password_hash=hash_password("adminpass123"),
+        )
+        storage.create_user(
+            conn,
+            email="owner@example.com",
+            name="Owner",
+            role="owner",
+            password_hash=hash_password("ownerpass123"),
+        )
+    tbm_app._LIVE_TRACKING_CACHE.clear()
+    return str(db_path)
+
+
+def _sample_flight_payload():
+    now = datetime.now(ZoneInfo("UTC"))
+    return {
+        "flights": [
+            {
+                "ident": "N656W",
+                "fa_flight_id": "N656W-123",
+                "status": "En Route",
+                "origin": {"code_icao": "KCAK"},
+                "destination": {"code_icao": "KSRQ"},
+                "latitude": 39.98,
+                "longitude": -82.89,
+                "groundspeed": 302,
+                "altitude": 24000,
+                "heading": 166,
+                "filed_departure_time": {"epoch": int((now - timedelta(minutes=50)).timestamp())},
+                "actual_departure_time": {"epoch": int((now - timedelta(minutes=45)).timestamp())},
+                "estimated_arrival_time": {"epoch": int((now + timedelta(minutes=95)).timestamp())},
+                "last_position": {"epoch": int((now - timedelta(minutes=1)).timestamp())},
+            }
+        ]
+    }
+
+
+def _sample_track_payload():
+    now = datetime.now(ZoneInfo("UTC"))
+    return {
+        "positions": [
+            {
+                "timestamp": int((now - timedelta(minutes=1)).timestamp()),
+                "latitude": 39.98,
+                "longitude": -82.89,
+                "groundspeed": 302,
+                "altitude": 24000,
+            },
+            {
+                "timestamp": int((now - timedelta(minutes=3)).timestamp()),
+                "latitude": 40.02,
+                "longitude": -83.10,
+                "groundspeed": 298,
+                "altitude": 23500,
+            },
+        ]
+    }
+
+
+def test_live_tracking_page_requires_login(live_env):
+    client = tbm_app.app.test_client()
+    resp = client.get("/live-tracking")
+    assert resp.status_code == 302
+    assert "/login" in resp.headers.get("Location", "")
+
+
+def test_live_tracking_api_requires_login(live_env):
+    client = tbm_app.app.test_client()
+    resp = client.get("/api/live-tracking")
+    assert resp.status_code == 401
+
+
+def test_live_tracking_page_renders_for_logged_in_owner(live_env):
+    client = tbm_app.app.test_client()
+    assert _login(client, "owner@example.com", "ownerpass123").status_code == 200
+    resp = client.get("/live-tracking")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "Live Tracking: N656W" in body
+    assert "Open in FlightAware" in body
+
+
+def test_live_tracking_api_fallback_without_api_key(live_env, monkeypatch):
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_AEROAPI_KEY", "")
+    tbm_app._LIVE_TRACKING_CACHE.clear()
+    client = tbm_app.app.test_client()
+    assert _login(client, "owner@example.com", "ownerpass123").status_code == 200
+
+    resp = client.get("/api/live-tracking")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["provider_mode"] == "fallback"
+    assert data["snapshot"]["tail_number"] == "N656W"
+    assert data["flightaware_url"].endswith("/N656W")
+
+
+def test_live_tracking_api_uses_aeroapi_and_cache(live_env, monkeypatch):
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_AEROAPI_KEY", "test-key")
+    tbm_app._LIVE_TRACKING_CACHE.clear()
+
+    calls = {"count": 0}
+
+    def fake_get(path, params=None):
+        calls["count"] += 1
+        if path.startswith("flights/N656W-123/track"):
+            return _sample_track_payload()
+        return _sample_flight_payload()
+
+    monkeypatch.setattr(tbm_app, "_flightaware_get", fake_get)
+
+    client = tbm_app.app.test_client()
+    assert _login(client, "owner@example.com", "ownerpass123").status_code == 200
+
+    first = client.get("/api/live-tracking")
+    second = client.get("/api/live-tracking")
+    assert first.status_code == 200
+    assert second.status_code == 200
+    data = first.get_json()
+    assert data["provider_mode"] == "aeroapi"
+    assert data["snapshot"]["status"] == "en_route"
+    assert len(data["snapshot"]["track_points"]) >= 1
+    # First call should fetch flights + track once. Second call should hit cache.
+    assert calls["count"] == 2
+
+
+def test_live_tracking_api_provider_failure_falls_back(live_env, monkeypatch):
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_AEROAPI_KEY", "test-key")
+    tbm_app._LIVE_TRACKING_CACHE.clear()
+
+    def fake_get(_path, params=None):  # noqa: ARG001
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(tbm_app, "_flightaware_get", fake_get)
+
+    client = tbm_app.app.test_client()
+    assert _login(client, "owner@example.com", "ownerpass123").status_code == 200
+    resp = client.get("/api/live-tracking")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["provider_mode"] == "fallback"
+    assert data["snapshot"]["status"] == "unknown"
+    assert data["warnings"]
+
+
+def test_live_tracking_api_matches_approved_reservation(live_env, monkeypatch):
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_AEROAPI_KEY", "test-key")
+    tbm_app._LIVE_TRACKING_CACHE.clear()
+
+    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+        owner = storage.get_user_by_email(conn, "owner@example.com")
+        now = datetime.now(ZoneInfo("UTC"))
+        storage.create_reservation(
+            conn,
+            status="approved",
+            start_utc=(now - timedelta(hours=1)).isoformat(),
+            end_utc=(now + timedelta(hours=2)).isoformat(),
+            dep_icao="KCAK",
+            dest_icao="KSRQ",
+            parked_icao="KSRQ",
+            traveling_user_id=int(owner["id"]),
+            requested_by_user_id=int(owner["id"]),
+            notes="Live test",
+        )
+
+    def fake_get(path, params=None):  # noqa: ARG001
+        if path.startswith("flights/N656W-123/track"):
+            return _sample_track_payload()
+        return _sample_flight_payload()
+
+    monkeypatch.setattr(tbm_app, "_flightaware_get", fake_get)
+
+    client = tbm_app.app.test_client()
+    assert _login(client, "owner@example.com", "ownerpass123").status_code == 200
+    resp = client.get("/api/live-tracking")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["reservation_match"] == "matched"
+    assert data["reservation_context"]["dep_icao"] == "KCAK"
+    assert data["reservation_context"]["dest_icao"] == "KSRQ"
+
+
+def test_live_tracking_nav_link_visible_for_logged_in_users(live_env):
+    client = tbm_app.app.test_client()
+    assert _login(client, "owner@example.com", "ownerpass123").status_code == 200
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert ">Live<" in body
