@@ -4,9 +4,75 @@
 {% block page_styles %}
 .grid{display:grid;grid-template-columns:1fr;gap:12px}
 .panel{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);border-radius:16px;padding:12px}
-.item{border-top:1px solid rgba(255,255,255,.08);padding:10px 0}
-.item:first-child{border-top:0}
-.meta{color:var(--muted);font-size:12px;margin-top:4px}
+.cardList{display:grid;gap:12px;margin-top:10px}
+.flightCard{
+  border:1px solid color-mix(in srgb, var(--color-border) 84%, white);
+  border-radius:14px;
+  background:color-mix(in srgb, var(--color-surface-soft) 42%, white);
+  padding:14px;
+  transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease, background-color .16s ease;
+}
+.flightCard:hover,
+.flightCard:focus-within{
+  transform:translateY(-2px);
+  border-color:color-mix(in srgb, var(--color-accent-strong) 26%, var(--color-border));
+  box-shadow:0 4px 12px rgba(22,51,0,.08);
+  background:color-mix(in srgb, var(--color-surface-soft) 62%, white);
+}
+.flightCardHead{display:grid;gap:6px}
+.flightTop{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.flightRoute{
+  margin:0;
+  color:var(--color-text-strong);
+  font-size:1rem;
+  font-weight:650;
+  letter-spacing:.01em;
+}
+.flightWhen{margin:0;color:var(--color-muted);font-size:12.5px;line-height:1.4}
+.flightMeta{color:var(--muted);font-size:12px;margin-top:8px}
+.flightActions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.btnDanger{
+  border-color:#efc1c1 !important;
+  background:#fff1f1 !important;
+  color:#8f2f2f !important;
+}
+.btnDanger:hover{
+  background:#ffe5e5 !important;
+  border-color:#e7abab !important;
+  color:#7d2525 !important;
+}
+.statusChip{
+  display:inline-flex;
+  align-items:center;
+  border:1px solid transparent;
+  border-radius:999px;
+  padding:2px 8px;
+  font-size:10.5px;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  font-weight:650;
+  white-space:nowrap;
+}
+.statusPending{
+  background:color-mix(in srgb, #9aa2b4 20%, white);
+  border-color:color-mix(in srgb, #9aa2b4 36%, white);
+  color:#4d5669;
+}
+.statusApproved{
+  background:color-mix(in srgb, #60b95f 20%, white);
+  border-color:color-mix(in srgb, #60b95f 34%, white);
+  color:#2e6a2f;
+}
+.statusDenied,.statusCanceled{
+  background:color-mix(in srgb, #c57b7b 18%, white);
+  border-color:color-mix(in srgb, #c57b7b 34%, white);
+  color:#7b3a3a;
+}
+.statusApplied{
+  background:color-mix(in srgb, #7a9bc5 20%, white);
+  border-color:color-mix(in srgb, #7a9bc5 34%, white);
+  color:#35587c;
+}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .btn{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--text);border-radius:999px;padding:7px 11px;cursor:pointer;font-size:12px}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:40}
@@ -21,6 +87,22 @@
 .airportOption{width:100%;border:0;border-top:1px solid rgba(255,255,255,.08);background:transparent;color:var(--text);text-align:left;padding:8px 10px;cursor:pointer;font-size:12px}
 .airportOption:first-child{border-top:0}
 .msg{font-size:12px;color:var(--muted);min-height:16px}
+.confirmModal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:60}
+.confirmModal.open{display:flex}
+.confirmCard{
+  width:min(420px,100%);
+  border:1px solid rgba(255,255,255,.16);
+  background:#111a2b;
+  border-radius:14px;
+  padding:16px;
+}
+.confirmTitle{margin:0 0 8px;font-size:16px}
+.confirmText{margin:0;color:var(--muted);font-size:13px;line-height:1.45}
+.confirmActions{display:flex;justify-content:flex-end;margin-top:12px}
+@media (max-width:560px){
+  .flightTop{align-items:flex-start;flex-direction:column}
+  .flightActions .btn{width:100%}
+}
 {% endblock %}
 {% block content %}
 <section class="grid">
@@ -28,18 +110,18 @@
     Display timezone: {{ home_timezone }}
   </div>
   <div class="panel">
-    <h3>Pending Requests</h3>
-    <div id="pendingList"></div>
+    <h3>Pending Requests <span id="pendingCount">(0)</span></h3>
+    <div id="pendingList" class="cardList"></div>
   </div>
 
   <div class="panel">
-    <h3>Upcoming Approved Flights</h3>
-    <div id="approvedList"></div>
+    <h3>Upcoming Approved Flights <span id="approvedCount">(0)</span></h3>
+    <div id="approvedList" class="cardList"></div>
   </div>
 
   <div class="panel">
-    <h3>My Change Requests</h3>
-    <div id="changeRequestList"></div>
+    <h3>My Change Requests <span id="changeRequestCount">(0)</span></h3>
+    <div id="changeRequestList" class="cardList"></div>
   </div>
 </section>
 
@@ -83,6 +165,16 @@
     <div id="modalMsg" class="msg"></div>
   </div>
 </section>
+
+<section id="confirmModal" class="confirmModal" aria-hidden="true">
+  <div class="confirmCard">
+    <h3 class="confirmTitle">Submitted</h3>
+    <p id="confirmText" class="confirmText"></p>
+    <div class="confirmActions">
+      <button id="confirmOkBtn" class="btn" type="button">OK</button>
+    </div>
+  </div>
+</section>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -90,6 +182,9 @@
   const pendingList = document.getElementById('pendingList');
   const approvedList = document.getElementById('approvedList');
   const changeRequestList = document.getElementById('changeRequestList');
+  const pendingCount = document.getElementById('pendingCount');
+  const approvedCount = document.getElementById('approvedCount');
+  const changeRequestCount = document.getElementById('changeRequestCount');
   const modal = document.getElementById('flightModal');
   const modalTitle = document.getElementById('modalTitle');
   const modalMsg = document.getElementById('modalMsg');
@@ -104,6 +199,9 @@
   const modalNotes = document.getElementById('modalNotes');
   const modalDepSuggestions = document.getElementById('modalDepSuggestions');
   const modalDestSuggestions = document.getElementById('modalDestSuggestions');
+  const confirmModal = document.getElementById('confirmModal');
+  const confirmText = document.getElementById('confirmText');
+  const confirmOkBtn = document.getElementById('confirmOkBtn');
 
   let actionContext = null;
   let pendingRows = [];
@@ -116,6 +214,15 @@
 
   function openModal(){ modal.classList.add('open'); }
   function closeModal(){ modal.classList.remove('open'); actionContext = null; setModalMsg(''); }
+  function openConfirm(message){
+    confirmText.textContent = message || '';
+    confirmModal.classList.add('open');
+    confirmModal.setAttribute('aria-hidden', 'false');
+  }
+  function closeConfirm(){
+    confirmModal.classList.remove('open');
+    confirmModal.setAttribute('aria-hidden', 'true');
+  }
 
   function splitIsoToDateTime(isoString){
     if(window.TBMReservationUI){ return window.TBMReservationUI.splitIsoToDateTime(isoString); }
@@ -128,7 +235,7 @@
   }
 
   function initQuarterHourSelect(selectEl){
-    if(window.TBMReservationUI){ window.TBMReservationUI.initQuarterHourSelect(selectEl, 'Select time'); }
+    if(window.TBMReservationUI){ window.TBMReservationUI.initQuarterHourSelect(selectEl, 'Select a Time'); }
   }
 
   function setupAirportAutocomplete(input, suggestionsEl){
@@ -184,55 +291,120 @@
     modalDep.value = item.dep_icao || '';
     modalDest.value = item.dest_icao || '';
     modalNotes.value = item.notes || '';
-    modalTitle.textContent = mode === 'edit-pending' ? `Edit Pending #${item.id}` : `Request Change for #${item.id}`;
+    modalTitle.textContent = mode === 'edit-pending' ? 'Edit Pending Reservation' : 'Request Change';
     submitModalBtn.textContent = mode === 'edit-pending' ? 'Save Pending Changes' : 'Submit Change Request';
     actionContext = { mode, reservationId: item.id };
     setModalMsg('');
     openModal();
   }
 
+  function sortByStartAscending(rows){
+    return (rows || []).slice().sort((a, b) => {
+      const left = Date.parse(a.start || '');
+      const right = Date.parse(b.start || '');
+      if(Number.isNaN(left) && Number.isNaN(right)) return 0;
+      if(Number.isNaN(left)) return 1;
+      if(Number.isNaN(right)) return -1;
+      return left - right;
+    });
+  }
+
+  function formatLocalDateTime(value){
+    if(window.TBMReservationUI){ return window.TBMReservationUI.formatLocalIsoDisplay(value); }
+    return String(value || '').slice(0,16).replace('T',' ');
+  }
+
+  function statusClass(status){
+    const normalized = String(status || '').toLowerCase();
+    if(normalized === 'pending') return 'statusPending';
+    if(normalized === 'approved') return 'statusApproved';
+    if(normalized === 'denied') return 'statusDenied';
+    if(normalized === 'canceled') return 'statusCanceled';
+    if(normalized === 'applied') return 'statusApplied';
+    return 'statusPending';
+  }
+
+  function buildChangeRequestPayloadFromItem(item, forCancellation){
+    const start = splitIsoToDateTime(item.start);
+    const end = splitIsoToDateTime(item.end);
+    const baseNotes = String(item.notes || '').trim();
+    const cancelPrefix = 'Cancellation requested by user.';
+    return {
+      start_date: start.date,
+      start_time: toQuarterHour(start.time),
+      end_date: end.date,
+      end_time: toQuarterHour(end.time),
+      dep_icao: String(item.dep_icao || '').toUpperCase(),
+      dest_icao: String(item.dest_icao || '').toUpperCase(),
+      notes: forCancellation ? (baseNotes ? `${cancelPrefix} ${baseNotes}` : cancelPrefix) : baseNotes,
+    };
+  }
+
   async function loadMyFlights(){
     const resp = await fetch('/api/my-flights');
-    if(!resp.ok){ pendingList.innerHTML = approvedList.innerHTML = '<div class="meta">Could not load flights.</div>'; return; }
+    if(!resp.ok){ pendingList.innerHTML = approvedList.innerHTML = '<div class="flightMeta">Could not load flights.</div>'; return; }
     const data = await resp.json();
-    pendingRows = data.pending || [];
-    approvedRows = data.approved_upcoming || [];
+    pendingRows = sortByStartAscending(data.pending || []);
+    approvedRows = sortByStartAscending(data.approved_upcoming || []);
+    pendingCount.textContent = `(${pendingRows.length})`;
+    approvedCount.textContent = `(${approvedRows.length})`;
 
-    if(!pendingRows.length) pendingList.innerHTML = '<div class="meta">No pending requests.</div>';
+    if(!pendingRows.length) pendingList.innerHTML = '<div class="flightMeta">No pending requests.</div>';
     else pendingList.innerHTML = pendingRows.map((item)=>`
-      <div class="item">
-        <div><strong>#${item.id}</strong> ${item.dep_icao} -> ${item.dest_icao}</div>
-        <div class="meta">${item.start_display} to ${item.end_display}</div>
-        <div class="meta">${item.notes || ''}</div>
-        <div class="actions">
-          <button class="btn" data-action="edit-pending" data-id="${item.id}">Edit Pending</button>
-          <button class="btn" data-action="cancel-pending" data-id="${item.id}">Cancel</button>
+      <article class="flightCard">
+        <div class="flightCardHead">
+          <div class="flightTop">
+            <p class="flightRoute">${item.dep_icao} → ${item.dest_icao}</p>
+            <span class="statusChip ${statusClass('pending')}">Pending</span>
+          </div>
+          <p class="flightWhen">${item.start_display} to ${item.end_display}</p>
         </div>
-      </div>
+        <div class="flightMeta">${item.notes || ''}</div>
+        <div class="flightActions">
+          <button class="btn" data-action="edit-pending" data-id="${item.id}">Edit Pending</button>
+          <button class="btn" data-action="view-detail" data-id="${item.id}" data-list="pending">View More Detail</button>
+          <button class="btn btnDanger" data-action="cancel-pending" data-id="${item.id}">Cancel</button>
+        </div>
+      </article>
     `).join('');
 
-    if(!approvedRows.length) approvedList.innerHTML = '<div class="meta">No upcoming approved flights.</div>';
+    if(!approvedRows.length) approvedList.innerHTML = '<div class="flightMeta">No upcoming approved flights.</div>';
     else approvedList.innerHTML = approvedRows.map((item)=>`
-      <div class="item">
-        <div><strong>#${item.id}</strong> ${item.dep_icao} -> ${item.dest_icao}</div>
-        <div class="meta">${item.start_display} to ${item.end_display}</div>
-        <div class="meta">${item.notes || ''}</div>
-        <div class="actions"><button class="btn" data-action="request-change" data-id="${item.id}">Request Change</button></div>
-      </div>
+      <article class="flightCard">
+        <div class="flightCardHead">
+          <div class="flightTop">
+            <p class="flightRoute">${item.dep_icao} → ${item.dest_icao}</p>
+            <span class="statusChip ${statusClass('approved')}">Approved</span>
+          </div>
+          <p class="flightWhen">${item.start_display} to ${item.end_display}</p>
+        </div>
+        <div class="flightMeta">${item.notes || ''}</div>
+        <div class="flightActions">
+          <button class="btn" data-action="request-change" data-id="${item.id}">Request Change</button>
+          <button class="btn" data-action="view-detail" data-id="${item.id}" data-list="approved">View More Detail</button>
+          <button class="btn btnDanger" data-action="cancel-approved" data-id="${item.id}">Cancel</button>
+        </div>
+      </article>
     `).join('');
   }
 
   async function loadMyChangeRequests(){
     const resp = await fetch('/api/my-change-requests');
-    if(!resp.ok){ changeRequestList.innerHTML = '<div class="meta">Could not load change requests.</div>'; return; }
+    if(!resp.ok){ changeRequestList.innerHTML = '<div class="flightMeta">Could not load change requests.</div>'; return; }
     const rows = await resp.json();
-    if(!rows.length){ changeRequestList.innerHTML = '<div class="meta">No change requests.</div>'; return; }
+    changeRequestCount.textContent = `(${rows.length})`;
+    if(!rows.length){ changeRequestList.innerHTML = '<div class="flightMeta">No change requests.</div>'; return; }
     changeRequestList.innerHTML = rows.map((r)=>`
-      <div class="item">
-        <div><strong>#${r.id}</strong> Reservation #${r.reservation_id} | ${r.status.toUpperCase()}</div>
-        <div class="meta">${r.proposed_dep_icao} -> ${r.proposed_dest_icao} | ${r.proposed_start.slice(0,16).replace('T',' ')} to ${r.proposed_end.slice(0,16).replace('T',' ')}</div>
-        <div class="meta">${r.proposed_notes || ''}</div>
-      </div>
+      <article class="flightCard changeCard">
+        <div class="flightCardHead">
+          <div class="flightTop">
+            <p class="flightRoute">Reservation ${r.reservation_id} Change Request</p>
+            <span class="statusChip ${statusClass(r.status)}">${r.status.toUpperCase()}</span>
+          </div>
+          <p class="flightWhen">${r.proposed_dep_icao} → ${r.proposed_dest_icao} | ${formatLocalDateTime(r.proposed_start)} to ${formatLocalDateTime(r.proposed_end)}</p>
+        </div>
+        <div class="flightMeta">${r.proposed_notes || ''}</div>
+      </article>
     `).join('');
   }
 
@@ -251,13 +423,33 @@
 
     if(action === 'cancel-pending'){
       const ok = await apiAction('POST', `/api/reservations/${id}/cancel`);
-      if(ok){ loadMyFlights(); }
+      if(ok){
+        loadMyFlights();
+        openConfirm('Cancellation has been sent to admin.');
+      }
       return;
     }
 
     if(action === 'request-change'){
       const item = approvedRows.find((row)=> String(row.id) === String(id));
       if(item) hydrateModal(item, 'request-change');
+      return;
+    }
+
+    if(action === 'cancel-approved'){
+      const item = approvedRows.find((row)=> String(row.id) === String(id));
+      if(!item) return;
+      const payload = buildChangeRequestPayloadFromItem(item, true);
+      const ok = await apiAction('POST', `/api/reservations/${id}/change-requests`, payload);
+      if(ok){
+        loadMyChangeRequests();
+        openConfirm('Cancellation has been sent to admin.');
+      }
+      return;
+    }
+
+    if(action === 'view-detail'){
+      window.location.href = `/reservations/${encodeURIComponent(String(id || ''))}`;
       return;
     }
   });
@@ -279,11 +471,14 @@
     if(result){
       closeModal();
       loadMyChangeRequests();
+      openConfirm('Change request has been sent to admin.');
     }
   });
 
   closeModalBtn.addEventListener('click', ()=> closeModal());
   modal.addEventListener('click', (event)=>{ if(event.target === modal) closeModal(); });
+  confirmOkBtn.addEventListener('click', ()=> closeConfirm());
+  confirmModal.addEventListener('click', (event)=>{ if(event.target === confirmModal) closeConfirm(); });
 
   setupAirportAutocomplete(modalDep, modalDepSuggestions);
   setupAirportAutocomplete(modalDest, modalDestSuggestions);

@@ -255,6 +255,137 @@ def test_reservations_api_shape_and_timezone_conversion(reservation_env):
     assert event["parked_icao"] == "KSRQ"
     assert event["status"] == "pending"
     assert event["start"].startswith("2030-02-01T")
+    assert event["can_cancel"] is True
+
+
+def test_reservations_api_applies_pending_and_owner_colors(reservation_env):
+    owner_client = tbm_app.app.test_client()
+    admin_client = tbm_app.app.test_client()
+    _login(owner_client, "owner1@example.com", "ownerpass123")
+    _login(admin_client, "admin@example.com", "adminpass123")
+
+    custom_pending = "#7A7A7A"
+    custom_owner = "#2AAE91"
+    owner_id = reservation_env["owner1"]
+    settings_resp = admin_client.patch(
+        "/api/admin/settings",
+        json={
+            "pending_reservation_color": custom_pending,
+            f"owner_color_{owner_id}": custom_owner,
+        },
+    )
+    assert settings_resp.status_code == 200
+
+    start = datetime(2030, 2, 2, 9, 0)
+    end = datetime(2030, 2, 2, 11, 0)
+    created = owner_client.post("/api/reservation-requests", json=_reservation_payload(start, end))
+    assert created.status_code == 201
+    reservation_id = int(created.get_json()["reservation"]["id"])
+
+    params = {"start": "2030-02-01", "end": "2030-02-03", "include_nonblocking": "false"}
+    pending_events = owner_client.get("/api/reservations", query_string=params).get_json()
+    pending_event = next(item for item in pending_events if int(item["id"]) == reservation_id)
+    assert pending_event["status"] == "pending"
+    assert pending_event["display_color"] == custom_pending
+
+    approved = admin_client.post(f"/api/reservations/{reservation_id}/approve")
+    assert approved.status_code == 200
+
+    approved_events = owner_client.get("/api/reservations", query_string=params).get_json()
+    approved_event = next(item for item in approved_events if int(item["id"]) == reservation_id)
+    assert approved_event["status"] == "approved"
+    assert approved_event["display_color"] == custom_owner
+
+
+def test_reservation_event_can_cancel_truth_table(reservation_env):
+    owner1_client = tbm_app.app.test_client()
+    owner2_client = tbm_app.app.test_client()
+    admin_client = tbm_app.app.test_client()
+    _login(owner1_client, "owner1@example.com", "ownerpass123")
+    _login(owner2_client, "owner2@example.com", "ownerpass123")
+    _login(admin_client, "admin@example.com", "adminpass123")
+
+    start = datetime.now() + timedelta(days=2)
+    end = start + timedelta(hours=2)
+    created = owner1_client.post("/api/reservation-requests", json=_reservation_payload(start, end))
+    assert created.status_code == 201
+    reservation_id = int(created.get_json()["reservation"]["id"])
+
+    params = {"start": (start - timedelta(days=1)).isoformat(), "end": (end + timedelta(days=4)).isoformat(), "include_nonblocking": "true"}
+
+    owner1_events = owner1_client.get("/api/reservations", query_string=params).get_json()
+    owner1_pending = next(item for item in owner1_events if int(item["id"]) == reservation_id)
+    assert owner1_pending["status"] == "pending"
+    assert owner1_pending["can_cancel"] is True
+
+    owner2_events = owner2_client.get("/api/reservations", query_string=params).get_json()
+    owner2_pending = next(item for item in owner2_events if int(item["id"]) == reservation_id)
+    assert owner2_pending["can_cancel"] is False
+
+    admin_events = admin_client.get("/api/reservations", query_string=params).get_json()
+    admin_pending = next(item for item in admin_events if int(item["id"]) == reservation_id)
+    assert admin_pending["can_cancel"] is True
+
+    approve = admin_client.post(f"/api/reservations/{reservation_id}/approve")
+    assert approve.status_code == 200
+
+    owner1_events_after_approve = owner1_client.get("/api/reservations", query_string=params).get_json()
+    owner1_approved = next(item for item in owner1_events_after_approve if int(item["id"]) == reservation_id)
+    assert owner1_approved["status"] == "approved"
+    assert owner1_approved["can_cancel"] is False
+
+    admin_events_after_approve = admin_client.get("/api/reservations", query_string=params).get_json()
+    admin_approved = next(item for item in admin_events_after_approve if int(item["id"]) == reservation_id)
+    assert admin_approved["can_cancel"] is True
+
+    second_created = owner1_client.post(
+        "/api/reservation-requests",
+        json=_reservation_payload(start + timedelta(days=2), end + timedelta(days=2)),
+    )
+    assert second_created.status_code == 201
+    second_id = int(second_created.get_json()["reservation"]["id"])
+    deny = admin_client.post(f"/api/reservations/{second_id}/deny", json={"note": "Denied for test"})
+    assert deny.status_code == 200
+
+    denied_events = admin_client.get("/api/reservations", query_string=params).get_json()
+    denied_event = next(item for item in denied_events if int(item["id"]) == second_id)
+    assert denied_event["status"] == "denied"
+    assert denied_event["can_cancel"] is False
+
+
+def test_reservation_detail_route_access_and_snapshot(reservation_env):
+    owner1_client = tbm_app.app.test_client()
+    owner2_client = tbm_app.app.test_client()
+    admin_client = tbm_app.app.test_client()
+    _login(owner1_client, "owner1@example.com", "ownerpass123")
+    _login(owner2_client, "owner2@example.com", "ownerpass123")
+    _login(admin_client, "admin@example.com", "adminpass123")
+
+    start = datetime.now() + timedelta(days=2)
+    end = start + timedelta(hours=2)
+    created = owner1_client.post("/api/reservation-requests", json=_reservation_payload(start, end))
+    assert created.status_code == 201
+    reservation_id = int(created.get_json()["reservation"]["id"])
+
+    owner_detail = owner1_client.get(f"/reservations/{reservation_id}")
+    assert owner_detail.status_code == 200
+    assert f"Reservation #{reservation_id}".encode() in owner_detail.data
+    assert b"Planning snapshot for this booked trip." in owner_detail.data
+    assert b"Edit Reservation" in owner_detail.data
+
+    forbidden = owner2_client.get(f"/reservations/{reservation_id}")
+    assert forbidden.status_code == 403
+
+    admin_detail = admin_client.get(f"/reservations/{reservation_id}")
+    assert admin_detail.status_code == 200
+
+    canceled = owner1_client.post(f"/api/reservations/{reservation_id}/cancel")
+    assert canceled.status_code == 200
+
+    owner_after_cancel = owner1_client.get(f"/reservations/{reservation_id}")
+    assert owner_after_cancel.status_code == 404
+    admin_after_cancel = admin_client.get(f"/reservations/{reservation_id}")
+    assert admin_after_cancel.status_code == 404
 
 
 def test_api_my_pending_reservations_returns_owner_scope_only(reservation_env):

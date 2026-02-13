@@ -9,16 +9,83 @@
 .sectionGapMd { margin-top: 16px; }
 .contentStack { display:grid; gap:12px; }
 .mutedTopNote { margin-top:8px; }
-.layout { display:grid; grid-template-columns:1.25fr 0.85fr; gap:16px; }
-@media (max-width:980px){ .layout{ grid-template-columns:1fr; } }
-.panel { padding:16px; }
+.layout {
+  display:grid;
+  grid-template-columns:minmax(0, 1.72fr) minmax(290px, 0.58fr);
+  gap:18px;
+  transition:grid-template-columns .2s ease;
+}
+.layout.is-sidebar-expanded{
+  grid-template-columns:minmax(0, 1.45fr) minmax(340px, 0.85fr);
+}
+@media (max-width:980px){
+  .layout,
+  .layout.is-sidebar-expanded{
+    grid-template-columns:1fr;
+  }
+}
+.panel { padding:18px; }
 .panel h3 { margin:0 0 12px; font-size:15.5px; }
 .panel h3 + .uiMeta { margin-top:-4px; margin-bottom:10px; }
-#calendar { min-height:620px; }
+#calendar { min-height:700px; }
+.fc .fc-toolbar.fc-header-toolbar{
+  margin-bottom:14px;
+  padding:8px;
+  border-radius:14px;
+  background: color-mix(in srgb, var(--color-surface-soft) 74%, white);
+  border:1px solid color-mix(in srgb, var(--color-border) 90%, white);
+}
+.fc .fc-toolbar-title{
+  font-size:1.75rem !important;
+  letter-spacing:0.02em;
+  color: color-mix(in srgb, var(--color-accent-strong) 66%, var(--color-text-strong));
+  font-weight:560;
+  text-transform:uppercase;
+}
+.fc .fc-button{
+  border-radius:10px !important;
+  border:1px solid color-mix(in srgb, var(--color-border) 86%, white) !important;
+  background: var(--color-surface) !important;
+  color: var(--color-text) !important;
+  box-shadow:none !important;
+  transition: background-color .16s ease, border-color .16s ease, transform .16s ease;
+}
+.fc .fc-button:hover{
+  background: color-mix(in srgb, var(--color-surface-soft) 68%, white) !important;
+  border-color: color-mix(in srgb, var(--color-accent-strong) 34%, var(--color-border)) !important;
+}
+.fc .fc-button-primary:not(:disabled).fc-button-active{
+  background: color-mix(in srgb, var(--color-accent) 28%, white) !important;
+  border-color: color-mix(in srgb, var(--color-accent) 44%, var(--color-border)) !important;
+  color: var(--color-text-strong) !important;
+}
+.fc .fc-daygrid-event,
+.fc .fc-timegrid-event{
+  border-radius:10px;
+  border:0 !important;
+  padding:2px 4px;
+  box-shadow:0 1px 5px rgba(22, 51, 0, 0.14);
+  transition: transform .14s ease, box-shadow .14s ease;
+}
+.fc .fc-daygrid-event:hover,
+.fc .fc-timegrid-event:hover{
+  transform: translateY(-1px);
+  box-shadow:0 4px 10px rgba(22, 51, 0, 0.18);
+}
+.fcEventWrap{display:grid;gap:2px;line-height:1.2}
+.fcEventRoute{font-size:11.5px;font-weight:700;letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fcEventOwner{font-size:10px;opacity:.92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fcEventStatus{font-size:9px;opacity:.88;text-transform:uppercase;letter-spacing:.04em}
 .field { margin-bottom:12px; position:relative; }
 .field textarea { min-height:76px; resize:vertical; }
 .dtGrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-.dtBox { border:1px solid var(--color-border); border-radius:12px; padding:10px; cursor:text; background:var(--color-surface-soft); }
+.dtBox {
+  border:1px solid color-mix(in srgb, var(--color-border) 88%, white);
+  border-radius:14px;
+  padding:12px;
+  cursor:text;
+  background: color-mix(in srgb, var(--color-surface-soft) 72%, white);
+}
 .airportSuggestions { position:absolute; left:0; right:0; top:100%; margin-top:4px; z-index:25; overflow:hidden; display:none; }
 .airportSuggestions.open { display:block; }
 .airportOption { width:100%; border:0; text-align:left; padding:8px 10px; cursor:pointer; font-size:12px; }
@@ -30,12 +97,32 @@
 .kv, .msg, .inline, .draftHint { font-size:12.5px; }
 .kv.mb8 { margin-bottom:8px; }
 .inline { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
-.msg { margin-top:10px; min-height:16px; }
+.calendarTip {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 90%, white);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface-soft) 74%, white);
+}
+.msg {
+  margin-top: 10px;
+  min-height: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.msg.is-error {
+  padding: 12px 14px;
+  border: 2px solid #cf3d4b;
+  border-radius: 8px;
+  background: #ffe8ec;
+  color: #7f1f2a !important;
+  box-shadow: 0 2px 8px rgba(207, 61, 75, 0.18);
+}
 .sectionTitle { margin-top:18px; }
 .pendingItemHead { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
 .is-hidden { display:none; }
 .quoteContext { margin-bottom:14px; }
-.draftPanel { margin-bottom:14px; padding:12px; background: color-mix(in srgb, var(--color-surface-soft) 52%, white) !important; box-shadow:none !important; }
+.draftPanel { margin-bottom:14px; padding:14px; background: color-mix(in srgb, var(--color-surface-soft) 52%, white) !important; box-shadow:none !important; }
 .draftPanel h4 { margin:0 0 10px; font-size:13px; }
 .draftLeg { padding:10px; margin-top:10px; }
 .draftLeg:first-of-type { margin-top:0; }
@@ -53,81 +140,178 @@
 }
 .actionsTop6 { margin-top:8px; }
 .actionsTop10 { margin-top:12px; }
-.formBlock { padding-top:12px; border-top:1px solid var(--color-border); }
-.quietSection { margin-top:18px; padding-top:14px; border-top:1px solid var(--color-border); }
-.quietSection .sectionTitle { margin-top:0; margin-bottom:10px; }
-@media (max-width:980px){ .draftGrid, .dtGrid { grid-template-columns:1fr; } }
+.formBlock {
+  padding:14px;
+  border:1px solid color-mix(in srgb, var(--color-border) 90%, white);
+  border-radius:16px;
+  background: color-mix(in srgb, var(--color-surface-soft) 70%, white);
+}
+.quietSection { margin-top:16px; }
+.subtleDisclosure{
+  border:1px solid color-mix(in srgb, var(--color-border) 92%, white);
+  border-radius:14px;
+  background: color-mix(in srgb, var(--color-surface-soft) 78%, white);
+  padding:10px 12px;
+}
+.subtleDisclosure summary{
+  list-style:none;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  font-size:14px;
+  font-weight:700;
+  color:var(--color-text);
+}
+.subtleDisclosure summary::-webkit-details-marker{ display:none; }
+.subtleDisclosure summary::after{
+  content:"Show";
+  font-size:12px;
+  font-weight:600;
+  color:var(--color-muted);
+}
+.subtleDisclosure[open] summary::after{ content:"Hide"; }
+.subtleDisclosureBody{ margin-top:10px; }
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:70}
+.modal.open{display:flex}
+.modalCard{
+  width:min(560px,100%);
+  max-height:85vh;
+  overflow:auto;
+  border:1px solid color-mix(in srgb, var(--color-border) 88%, white);
+  background:var(--color-surface);
+  border-radius:14px;
+  padding:16px;
+}
+.reservationDetailGrid{
+  display:grid;
+  gap:10px;
+  grid-template-columns:1fr 1fr;
+}
+.reservationDetailItem{
+  border:1px solid color-mix(in srgb, var(--color-border) 90%, white);
+  border-radius:10px;
+  background: color-mix(in srgb, var(--color-surface-soft) 74%, white);
+  padding:8px 10px;
+}
+.reservationDetailItem.full{ grid-column:1 / -1; }
+.reservationStatus{
+  display:inline-flex;
+  align-items:center;
+  border:1px solid color-mix(in srgb, var(--color-border) 84%, white);
+  border-radius:999px;
+  padding:3px 8px;
+  font-size:10.5px;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  font-weight:650;
+}
+@media (max-width:980px){
+  .draftGrid, .dtGrid { grid-template-columns:1fr; }
+  .reservationDetailGrid{ grid-template-columns:1fr; }
+  .fc .fc-toolbar.fc-header-toolbar{ padding:8px 6px; }
+  .fc .fc-toolbar{
+    display:grid !important;
+    gap:8px;
+  }
+  .fc .fc-toolbar-title{ font-size:1.35rem !important; text-align:center; }
+}
 {% endblock %}
 {% block content %}
-<section class="layout">
+<section class="layout" id="calendarLayout">
   <div class="panel">
     <div class="inline">
       <input id="includeNonBlocking" type="checkbox" />
       <label for="includeNonBlocking">Show denied/canceled</label>
     </div>
+    <div class="calendarTip uiMeta" title="Click any reservation block in the calendar to open full reservation details and actions.">
+      Tip: click any reservation on the calendar to view details.
+    </div>
     <div id="calendar"></div>
   </div>
 
-  <div class="panel">
-    <h3>Request / Edit Reservation</h3>
-    <p class="uiMeta">Need a full list view? Open <a href="/my-flights">My Flights</a>.</p>
-    <div id="quoteDraftPanel" class="quoteContext uiSectionCompact"></div>
+  <div class="panel" id="calendarSidebarPanel">
+    <details class="subtleDisclosure" id="requestTripDisclosure">
+      <summary>Request a Trip</summary>
+      <div class="subtleDisclosureBody">
+        <p class="uiMeta">Need a full list view? Open <a href="/my-flights">My Flights</a>.</p>
+        <div id="quoteDraftPanel" class="quoteContext uiSectionCompact"></div>
 
-    <div class="formBlock uiStack">
-      <div class="field">
-        <label>Departure Date / Time ({{ home_timezone }})</label>
-        <div class="dtGrid dtBox" data-dt-box="start" data-date-input="startDate" data-time-input="startTime">
-          <input id="startDate" type="date" required />
-          <select id="startTime" class="js-custom-select" required></select>
+        <div class="formBlock uiStack">
+          <div class="field">
+            <label>Departure Date / Time ({{ home_timezone }})</label>
+            <div class="dtGrid dtBox" data-dt-box="start" data-date-input="startDate" data-time-input="startTime">
+              <input id="startDate" type="date" required />
+              <select id="startTime" class="js-custom-select" required></select>
+            </div>
+          </div>
+          <p class="uiMeta">Arrival date/time is set automatically from departure time and trip duration.</p>
+          <input id="endDate" type="hidden" />
+          <input id="endTime" type="hidden" />
+          <div class="field" id="depIcaoField">
+            <label for="depIcao">Departure Airport</label>
+            <input id="depIcao" type="text" maxlength="4" autocomplete="off" required />
+            <div id="depIcaoSuggestions" class="airportSuggestions"></div>
+          </div>
+          <div class="field" id="destIcaoField">
+            <label for="destIcao">Destination Airport</label>
+            <input id="destIcao" type="text" maxlength="4" autocomplete="off" required />
+            <div id="destIcaoSuggestions" class="airportSuggestions"></div>
+          </div>
+          <div class="field">
+            <label for="travelingOwner">Traveling Owner</label>
+            <select id="travelingOwner" class="js-custom-select"></select>
+          </div>
+          <div class="field">
+            <label for="reservationNotes">Notes</label>
+            <textarea id="reservationNotes"></textarea>
+          </div>
+          <div class="actions">
+            <button class="btn primary" id="saveBtn" type="button">Submit Request</button>
+            <button class="btn" id="clearBtn" type="button">Clear</button>
+            <button class="btn danger is-hidden" id="cancelBtn" type="button">Cancel Reservation</button>
+          </div>
+          <div id="formMsg" class="msg" role="alert" aria-live="assertive"></div>
         </div>
       </div>
-      <div class="field">
-        <label>Arrival Date / Time ({{ home_timezone }})</label>
-        <div class="dtGrid dtBox" data-dt-box="end" data-date-input="endDate" data-time-input="endTime">
-          <input id="endDate" type="date" required />
-          <select id="endTime" class="js-custom-select" required></select>
-        </div>
-      </div>
-      <div class="field" id="depIcaoField">
-        <label for="depIcao">Departure Airport</label>
-        <input id="depIcao" type="text" maxlength="4" autocomplete="off" required />
-        <div id="depIcaoSuggestions" class="airportSuggestions"></div>
-      </div>
-      <div class="field" id="destIcaoField">
-        <label for="destIcao">Destination Airport</label>
-        <input id="destIcao" type="text" maxlength="4" autocomplete="off" required />
-        <div id="destIcaoSuggestions" class="airportSuggestions"></div>
-      </div>
-      <div class="field">
-        <label for="travelingOwner">Traveling Owner</label>
-        <select id="travelingOwner" class="js-custom-select"></select>
-      </div>
-      <div class="field">
-        <label for="reservationNotes">Notes</label>
-        <textarea id="reservationNotes"></textarea>
-      </div>
-      <div class="actions">
-        <button class="btn primary" id="saveBtn" type="button">Submit Request</button>
-        <button class="btn" id="clearBtn" type="button">Clear</button>
-        <button class="btn danger is-hidden" id="cancelBtn" type="button">Cancel Reservation</button>
-      </div>
-      <div id="formMsg" class="msg"></div>
+    </details>
+
+    <div class="quietSection">
+      <details class="subtleDisclosure">
+        <summary>My Pending Requests</summary>
+        <div id="myPendingList" class="subtleDisclosureBody"></div>
+      </details>
     </div>
 
     <div class="quietSection">
-      <h3 class="sectionTitle">My Pending Requests</h3>
-      <div id="myPendingList"></div>
+      <details class="subtleDisclosure">
+        <summary>Availability</summary>
+        <div id="availabilityMeta" class="kv subtleDisclosureBody">Loading...</div>
+      </details>
     </div>
 
     <div class="quietSection">
-      <h3 class="sectionTitle">Availability</h3>
-      <div id="availabilityMeta" class="kv">Loading...</div>
+      <details class="subtleDisclosure">
+        <summary>Upcoming</summary>
+        <div id="upcomingList" class="subtleDisclosureBody"></div>
+      </details>
     </div>
+  </div>
+</section>
 
-    <div class="quietSection">
-      <h3 class="sectionTitle">Upcoming</h3>
-      <div id="upcomingList"></div>
+<section id="reservationDetailModal" class="modal">
+  <div class="modalCard">
+    <div class="actions" style="justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <h3 style="margin:0;">Reservation Details</h3>
+      <button class="btn" id="detailCloseBtn" type="button">Close</button>
     </div>
+    <div id="reservationDetailBody" class="reservationDetailGrid kv"></div>
+    <div class="actions" style="margin-top:12px;">
+      <button class="btn" id="detailViewBtn" type="button">View More Detail</button>
+      <button class="btn danger is-hidden" id="detailCancelBtn" type="button">Cancel</button>
+      <button class="btn is-hidden" id="detailEditBtn" type="button">Edit</button>
+    </div>
+    <div id="detailMsg" class="msg"></div>
   </div>
 </section>
 {% endblock %}
@@ -135,8 +319,11 @@
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
 <script>
 (() => {
-  const statusColor = { pending:'#e7b45f', approved:'#5fcfb4', denied:'#9aa2b4', canceled:'#8893a7' };
+  const statusColor = { pending:'#9aa2b4', approved:'#5fcfb4', denied:'#9aa2b4', canceled:'#8893a7' };
+  const minReservationMinutes = Math.max(1, Number({{ reservation_min_minutes|int }}) || 1);
   const el = {
+    layout: document.getElementById('calendarLayout'),
+    requestTripDisclosure: document.getElementById('requestTripDisclosure'),
     includeNonBlocking: document.getElementById('includeNonBlocking'),
     startDate: document.getElementById('startDate'),
     startTime: document.getElementById('startTime'),
@@ -154,17 +341,143 @@
     formMsg: document.getElementById('formMsg'),
     myPendingList: document.getElementById('myPendingList'),
     upcomingList: document.getElementById('upcomingList'),
-    availabilityMeta: document.getElementById('availabilityMeta')
+    availabilityMeta: document.getElementById('availabilityMeta'),
+    reservationDetailModal: document.getElementById('reservationDetailModal'),
+    reservationDetailBody: document.getElementById('reservationDetailBody'),
+    detailCloseBtn: document.getElementById('detailCloseBtn'),
+    detailViewBtn: document.getElementById('detailViewBtn'),
+    detailCancelBtn: document.getElementById('detailCancelBtn'),
+    detailEditBtn: document.getElementById('detailEditBtn'),
+    detailMsg: document.getElementById('detailMsg'),
   };
   const quoteDraftPanel = document.getElementById('quoteDraftPanel');
 
   let editingId = null;
   let activeDraftToken = '';
   let activeDraftData = null;
+  let currentDurationMinutes = minReservationMinutes;
+  let selectedReservation = null;
+  let calendarResizeTimer = null;
+
+  function scheduleCalendarResize(delayMs){
+    if(typeof calendar === 'undefined' || !(calendar instanceof FullCalendar.Calendar)) return;
+    if(calendarResizeTimer){ window.clearTimeout(calendarResizeTimer); }
+    const doResize = () => {
+      calendar.updateSize();
+    };
+    if(delayMs && delayMs > 0){
+      calendarResizeTimer = window.setTimeout(doResize, delayMs);
+      return;
+    }
+    doResize();
+  }
+
+  function syncSidebarExpansionState(){
+    if(!(el.layout instanceof HTMLElement)) return;
+    const isExpanded = !!(el.requestTripDisclosure && el.requestTripDisclosure.open);
+    el.layout.classList.toggle('is-sidebar-expanded', isExpanded);
+    scheduleCalendarResize();
+    scheduleCalendarResize(240);
+  }
+
+  function eventTextColorForBackground(hexColor){
+    const raw = String(hexColor || '').trim();
+    if(!/^#[0-9A-Fa-f]{6}$/.test(raw)) return '#0f1725';
+    const r = parseInt(raw.slice(1, 3), 16);
+    const g = parseInt(raw.slice(3, 5), 16);
+    const b = parseInt(raw.slice(5, 7), 16);
+    const luminance = ((0.299 * r) + (0.587 * g) + (0.114 * b)) / 255;
+    return luminance < 0.55 ? '#f8fafc' : '#0f1725';
+  }
 
   function setMsg(message, isError){
-    el.formMsg.textContent = message || '';
-    el.formMsg.style.color = isError ? '#ffd8de' : 'var(--muted)';
+    const hasMessage = !!message;
+    el.formMsg.textContent = hasMessage && isError && !String(message).startsWith('Error:') ? `Error: ${message}` : (message || '');
+    el.formMsg.classList.toggle('is-error', hasMessage && !!isError);
+  }
+
+  function setDetailMsg(message, isError){
+    const hasMessage = !!message;
+    el.detailMsg.textContent = hasMessage && isError && !String(message).startsWith('Error:') ? `Error: ${message}` : (message || '');
+    el.detailMsg.classList.toggle('is-error', hasMessage && !!isError);
+  }
+
+  function formatLocalDisplay(isoValue){
+    if(window.TBMReservationUI){ return window.TBMReservationUI.formatLocalIsoDisplay(isoValue); }
+    return String(isoValue || '');
+  }
+
+  async function maybeLoadEditReservationFromQuery(){
+    const params = new URLSearchParams(window.location.search);
+    const idRaw = (params.get('edit_reservation_id') || '').trim();
+    if(!idRaw) return;
+    const reservationId = Number(idRaw);
+    if(!Number.isFinite(reservationId) || reservationId < 1) return;
+
+    const startRaw = (params.get('edit_start') || '').trim();
+    const endRaw = (params.get('edit_end') || '').trim();
+    const fallbackStart = new Date();
+    fallbackStart.setDate(fallbackStart.getDate() - 30);
+    const fallbackEnd = new Date();
+    fallbackEnd.setDate(fallbackEnd.getDate() + 365);
+    const parsedStart = startRaw ? new Date(startRaw) : null;
+    const parsedEnd = endRaw ? new Date(endRaw) : null;
+    const rangeStart = parsedStart && !Number.isNaN(parsedStart.getTime()) ? parsedStart : fallbackStart;
+    const rangeEnd = parsedEnd && !Number.isNaN(parsedEnd.getTime()) ? parsedEnd : fallbackEnd;
+
+    const query = new URLSearchParams({
+      start: rangeStart.toISOString(),
+      end: rangeEnd.toISOString(),
+      include_nonblocking: 'true',
+    });
+    const resp = await fetch(`/api/reservations?${query.toString()}`);
+    const rows = await resp.json().catch(() => ([]));
+    if(!resp.ok || !Array.isArray(rows)){
+      setMsg('Could not load reservation from detail page link.', true);
+      return;
+    }
+    const row = rows.find((item)=> Number(item.id) === reservationId);
+    if(!row || !row.editable){
+      setMsg('Reservation is not editable in this account context.', true);
+      return;
+    }
+    setReservationIntoForm(row);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('edit_reservation_id');
+    url.searchParams.delete('edit_start');
+    url.searchParams.delete('edit_end');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+  }
+
+  function closeReservationDetailModal(){
+    el.reservationDetailModal.classList.remove('open');
+    selectedReservation = null;
+    setDetailMsg('');
+  }
+
+  function openReservationDetailModal(reservation){
+    selectedReservation = reservation;
+    const status = escapeHtml(String(reservation.status || '').toUpperCase());
+    const owner = escapeHtml(reservation.traveling_owner || 'Unknown');
+    const dep = escapeHtml(reservation.dep_icao || '');
+    const dest = escapeHtml(reservation.dest_icao || '');
+    const parked = escapeHtml(reservation.parked_icao || '');
+    const notes = escapeHtml(reservation.notes || '');
+    const startDisplay = escapeHtml(formatLocalDisplay(reservation.start));
+    const endDisplay = escapeHtml(formatLocalDisplay(reservation.end));
+    el.reservationDetailBody.innerHTML = `
+      <div class="reservationDetailItem"><strong>Route</strong><div>${dep} → ${dest}</div></div>
+      <div class="reservationDetailItem"><strong>Owner</strong><div>${owner}</div></div>
+      <div class="reservationDetailItem"><strong>Start</strong><div>${startDisplay}</div></div>
+      <div class="reservationDetailItem"><strong>End</strong><div>${endDisplay}</div></div>
+      <div class="reservationDetailItem"><strong>Parked</strong><div>${parked}</div></div>
+      <div class="reservationDetailItem"><strong>Status</strong><div><span class="reservationStatus">${status || 'UNKNOWN'}</span></div></div>
+      <div class="reservationDetailItem full"><strong>Notes</strong><div>${notes || '-'}</div></div>
+    `;
+    el.detailCancelBtn.classList.toggle('is-hidden', !reservation.can_cancel);
+    el.detailEditBtn.classList.toggle('is-hidden', !reservation.editable);
+    setDetailMsg('');
+    el.reservationDetailModal.classList.add('open');
   }
 
   function splitIsoToDateTime(isoString){
@@ -177,8 +490,13 @@
     return '';
   }
 
+  function formatLocalDateTime(value){
+    if(window.TBMReservationUI){ return window.TBMReservationUI.formatLocalIsoDisplay(value); }
+    return String(value || '').slice(0,16).replace('T',' ');
+  }
+
   function initQuarterHourSelect(selectEl){
-    if(window.TBMReservationUI){ window.TBMReservationUI.initQuarterHourSelect(selectEl, 'Select time'); }
+    if(window.TBMReservationUI){ window.TBMReservationUI.initQuarterHourSelect(selectEl, 'Select a Time'); }
   }
 
   function setSelectValue(selectEl, value, fallback = ''){
@@ -192,21 +510,64 @@
       const trigger = document.getElementById(triggerId);
       if(trigger){
         const selected = selectEl.options[selectEl.selectedIndex];
-        trigger.textContent = selected ? selected.textContent || '' : 'Select time';
+        trigger.textContent = selected ? selected.textContent || '' : 'Select a Time';
       }
     }
   }
 
-  function applyEndConstraints(){
-    el.endDate.min = el.startDate.value || '';
-    if (el.endDate.value && el.startDate.value && el.endDate.value < el.startDate.value) {
-      el.endDate.value = el.startDate.value;
+  function minutesBetween(startDate, startTime, endDate, endTime){
+    const start = new Date(`${startDate}T${startTime}`);
+    const end = new Date(`${endDate}T${endTime}`);
+    if(Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+    return Math.floor((end.getTime() - start.getTime()) / 60000);
+  }
+
+  function setDurationFromWindow(startDate, startTime, endDate, endTime){
+    const minutes = minutesBetween(startDate, startTime, endDate, endTime);
+    currentDurationMinutes = (minutes && minutes > 0) ? Math.max(minReservationMinutes, minutes) : minReservationMinutes;
+  }
+
+  function ceilToQuarterHour(dateValue){
+    const out = new Date(dateValue.getTime());
+    out.setSeconds(0, 0);
+    const remainder = out.getMinutes() % 15;
+    if(remainder !== 0){
+      out.setMinutes(out.getMinutes() + (15 - remainder));
     }
+    return out;
+  }
+
+  function syncAutoEndFromStart(){
+    if(!el.startDate.value || !el.startTime.value){
+      el.endDate.value = '';
+      el.endTime.value = '';
+      return;
+    }
+    const start = new Date(`${el.startDate.value}T${el.startTime.value}`);
+    if(Number.isNaN(start.getTime())){
+      el.endDate.value = '';
+      el.endTime.value = '';
+      return;
+    }
+    const rawEnd = new Date(start.getTime() + (Math.max(minReservationMinutes, currentDurationMinutes) * 60000));
+    const end = ceilToQuarterHour(rawEnd);
+    const endDate = String(end.getFullYear());
+    const endMonth = String(end.getMonth() + 1).padStart(2, '0');
+    const endDay = String(end.getDate()).padStart(2, '0');
+    const endHour = String(end.getHours()).padStart(2, '0');
+    const endMinute = String(end.getMinutes()).padStart(2, '0');
+    el.endDate.value = `${endDate}-${endMonth}-${endDay}`;
+    el.endTime.value = `${endHour}:${endMinute}`;
   }
 
   function validateDateTimeOrder(){
-    if (!el.startDate.value || !el.startTime.value || !el.endDate.value || !el.endTime.value) {
-      setMsg('Departure and arrival date/time are required.', true);
+    syncAutoEndFromStart();
+    if (!el.startDate.value || !el.startTime.value) {
+      setMsg('Departure date/time is required.', true);
+      return false;
+    }
+    if (!el.endDate.value || !el.endTime.value) {
+      setMsg('Unable to compute arrival date/time from the selected departure.', true);
       return false;
     }
     const start = new Date(`${el.startDate.value}T${el.startTime.value}`);
@@ -228,10 +589,10 @@
     el.saveBtn.textContent = 'Submit Request';
     el.cancelBtn.style.display = 'none';
     el.startDate.value = '';
-    setSelectValue(el.startTime, '06:00');
+    setSelectValue(el.startTime, '');
+    currentDurationMinutes = minReservationMinutes;
     el.endDate.value = '';
-    setSelectValue(el.endTime, '06:00');
-    el.endDate.min = '';
+    el.endTime.value = '';
     el.depIcao.value = '';
     el.destIcao.value = '';
     el.reservationNotes.value = '';
@@ -265,11 +626,10 @@
   function prefillFormFromLeg(leg){
     const start = localIsoToDateTime(leg.start_local);
     const end = localIsoToDateTime(leg.end_local);
+    setDurationFromWindow(start.date, toQuarterHour(start.time), end.date, toQuarterHour(end.time));
     el.startDate.value = start.date;
-    setSelectValue(el.startTime, toQuarterHour(start.time), '06:00');
-    el.endDate.value = end.date;
-    setSelectValue(el.endTime, toQuarterHour(end.time), '06:00');
-    applyEndConstraints();
+    setSelectValue(el.startTime, toQuarterHour(start.time), '');
+    syncAutoEndFromStart();
     el.depIcao.value = (leg.dep_icao || '').toUpperCase();
     el.destIcao.value = (leg.dest_icao || '').toUpperCase();
     el.reservationNotes.value = leg.notes || '';
@@ -306,7 +666,7 @@
         <div class="draftPanel">
           <h4>Quote Draft (ONEWAY)</h4>
           <div class="kv">Estimate details are prefilled in the reservation form below.</div>
-          <div class="kv">Expires: ${(activeDraftData.expires_at || '').slice(0, 16).replace('T', ' ')}</div>
+          <div class="kv">Expires: ${formatLocalDateTime(activeDraftData.expires_at || '')}</div>
         </div>
       `;
       return;
@@ -340,7 +700,7 @@
     quoteDraftPanel.innerHTML = `
       <div class="draftPanel">
         <h4>Quote Draft (${(activeDraftData.trip_type || 'oneway').toUpperCase()})</h4>
-        <div class="kv">Expires: ${(activeDraftData.expires_at || '').slice(0, 16).replace('T', ' ')}</div>
+        <div class="kv">Expires: ${formatLocalDateTime(activeDraftData.expires_at || '')}</div>
         ${legsHtml}
         ${isRoundtrip ? `<div class="actions actionsTop10">
           <button class="btn primary" id="submitDraftRoundtripBtn" type="button">Submit 2 Requests</button>
@@ -365,13 +725,11 @@
     el.cancelBtn.style.display = 'inline-block';
     const startParts = splitIsoToDateTime(reservation.start);
     const endParts = splitIsoToDateTime(reservation.end);
+    setDurationFromWindow(startParts.date, toQuarterHour(startParts.time), endParts.date, toQuarterHour(endParts.time));
     el.startDate.value = startParts.date;
-    setSelectValue(el.startTime, startParts.time, '06:00');
-    el.endDate.value = endParts.date;
-    setSelectValue(el.endTime, endParts.time, '06:00');
-    setSelectValue(el.startTime, toQuarterHour(el.startTime.value), '06:00');
-    setSelectValue(el.endTime, toQuarterHour(el.endTime.value), '06:00');
-    applyEndConstraints();
+    setSelectValue(el.startTime, startParts.time, '');
+    setSelectValue(el.startTime, toQuarterHour(el.startTime.value), '');
+    syncAutoEndFromStart();
     el.depIcao.value = reservation.dep_icao;
     el.destIcao.value = reservation.dest_icao;
     el.reservationNotes.value = reservation.notes || '';
@@ -400,7 +758,7 @@
           <div><strong>${row.dep_icao} -> ${row.dest_icao}</strong></div>
           <button class="btn small" type="button" data-edit-id="${row.id}">Edit</button>
         </div>
-        <div class="kv">${row.start.slice(0,16).replace('T',' ')} to ${row.end.slice(0,16).replace('T',' ')}</div>
+        <div class="kv">${formatLocalDateTime(row.start)} to ${formatLocalDateTime(row.end)}</div>
         <div class="kv">${row.notes || ''}</div>
       `;
       el.myPendingList.appendChild(node);
@@ -414,7 +772,7 @@
     const resp = await fetch(`/api/availability-summary?${params.toString()}`);
     if(!resp.ok) return;
     const data = await resp.json();
-    const next = data.next_available ? `${data.next_available.start.slice(0,16).replace('T',' ')} to ${data.next_available.end.slice(0,16).replace('T',' ')}` : 'No open window in selected range';
+    const next = data.next_available ? `${formatLocalDateTime(data.next_available.start)} to ${formatLocalDateTime(data.next_available.end)}` : 'No open window in selected range';
     el.availabilityMeta.textContent = `Current parked: ${data.current_parked_icao}. Next available: ${next}.`;
 
     el.upcomingList.innerHTML = '';
@@ -424,7 +782,7 @@
       node.className = 'item';
       node.innerHTML = `
         <div><strong>${item.traveling_owner}</strong> - ${item.dep_icao} -> ${item.dest_icao} (Parked: ${item.parked_icao})</div>
-        <div class="kv">${item.status.toUpperCase()} | ${item.start.slice(0,16).replace('T',' ')} to ${item.end.slice(0,16).replace('T',' ')}</div>
+        <div class="kv">${item.status.toUpperCase()} | ${formatLocalDateTime(item.start)} to ${formatLocalDateTime(item.end)}</div>
       `;
       el.upcomingList.appendChild(node);
     });
@@ -470,7 +828,6 @@
 
   if(window.TBMDateTimeBox){ window.TBMDateTimeBox.bindAll(document); }
   initQuarterHourSelect(el.startTime);
-  initQuarterHourSelect(el.endTime);
   if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
 
   const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
@@ -482,13 +839,65 @@
         const resp = await fetch(`/api/reservations?${params.toString()}`);
         if(!resp.ok) throw new Error('Failed to load reservations');
         const events = await resp.json();
-        success(events.map((event)=>({ ...event, backgroundColor: statusColor[event.status] || '#9aa2b4', borderColor: statusColor[event.status] || '#9aa2b4', textColor:'#0f1725' })));
+        success(events.map((event)=>{
+          const eventColor = event.display_color || statusColor[event.status] || '#9aa2b4';
+          return {
+            ...event,
+            backgroundColor: eventColor,
+            borderColor: eventColor,
+            textColor: eventTextColorForBackground(eventColor),
+          };
+        }));
       } catch(err){ failure(err); }
+    },
+    eventContent:(arg)=>{
+      const event = arg.event;
+      const props = event.extendedProps || {};
+      const route = `${props.dep_icao || ''} → ${props.dest_icao || ''}`.trim();
+      const owner = props.traveling_owner || '';
+      const status = String(props.status || '').toUpperCase();
+
+      const wrap = document.createElement('div');
+      wrap.className = 'fcEventWrap';
+
+      const routeEl = document.createElement('div');
+      routeEl.className = 'fcEventRoute';
+      routeEl.textContent = route || event.title || 'Reservation';
+      wrap.appendChild(routeEl);
+
+      if(owner){
+        const ownerEl = document.createElement('div');
+        ownerEl.className = 'fcEventOwner';
+        ownerEl.textContent = owner;
+        wrap.appendChild(ownerEl);
+      }
+
+      if(status){
+        if(status === 'APPROVED'){
+          return { domNodes:[wrap] };
+        }
+        const statusEl = document.createElement('div');
+        statusEl.className = 'fcEventStatus';
+        statusEl.textContent = status;
+        wrap.appendChild(statusEl);
+      }
+      return { domNodes:[wrap] };
     },
     eventClick:(info)=>{
       const event = info.event;
-      if(!event.extendedProps.editable){ setMsg('This reservation is read-only for your account.', true); return; }
-      setReservationIntoForm({ id:event.id, start:event.startStr, end:event.endStr, dep_icao:event.extendedProps.dep_icao, dest_icao:event.extendedProps.dest_icao, notes:event.extendedProps.notes || '' });
+      openReservationDetailModal({
+        id: event.id,
+        start: event.startStr,
+        end: event.endStr,
+        dep_icao: event.extendedProps.dep_icao,
+        dest_icao: event.extendedProps.dest_icao,
+        parked_icao: event.extendedProps.parked_icao,
+        traveling_owner: event.extendedProps.traveling_owner,
+        notes: event.extendedProps.notes || '',
+        status: event.extendedProps.status,
+        editable: !!event.extendedProps.editable,
+        can_cancel: !!event.extendedProps.can_cancel,
+      });
     }
   });
 
@@ -544,11 +953,24 @@
     }
   });
 
-  el.startDate.addEventListener('change', applyEndConstraints);
+  el.startDate.addEventListener('change', syncAutoEndFromStart);
+  el.startTime.addEventListener('change', syncAutoEndFromStart);
   el.includeNonBlocking.addEventListener('change', ()=> calendar.refetchEvents());
   el.clearBtn.addEventListener('click', ()=> resetForm());
+  if(el.requestTripDisclosure){
+    el.requestTripDisclosure.addEventListener('toggle', syncSidebarExpansionState);
+  }
+  if(el.layout){
+    el.layout.addEventListener('transitionend', (event)=>{
+      if(event && event.propertyName === 'grid-template-columns'){
+        scheduleCalendarResize();
+      }
+    });
+  }
+  window.addEventListener('resize', ()=>{ scheduleCalendarResize(60); });
 
   el.saveBtn.addEventListener('click', async ()=>{
+    syncAutoEndFromStart();
     if(!validateDateTimeOrder()) return;
     const payload = payloadFromForm();
     let endpoint = editingId ? `/api/reservations/${editingId}` : '/api/reservation-requests';
@@ -604,11 +1026,49 @@
     loadSummary();
   });
 
+  el.detailCloseBtn.addEventListener('click', () => closeReservationDetailModal());
+  el.reservationDetailModal.addEventListener('click', (event)=>{
+    if(event.target === el.reservationDetailModal){
+      closeReservationDetailModal();
+    }
+  });
+  el.detailViewBtn.addEventListener('click', ()=>{
+    if(!selectedReservation) return;
+    window.location.href = `/reservations/${encodeURIComponent(String(selectedReservation.id || ''))}`;
+  });
+  el.detailEditBtn.addEventListener('click', ()=>{
+    if(!selectedReservation || !selectedReservation.editable) return;
+    setReservationIntoForm({
+      id: selectedReservation.id,
+      start: selectedReservation.start,
+      end: selectedReservation.end,
+      dep_icao: selectedReservation.dep_icao,
+      dest_icao: selectedReservation.dest_icao,
+      notes: selectedReservation.notes || '',
+    });
+    closeReservationDetailModal();
+  });
+  el.detailCancelBtn.addEventListener('click', async ()=>{
+    if(!selectedReservation || !selectedReservation.can_cancel) return;
+    const resp = await fetch(`/api/reservations/${selectedReservation.id}/cancel`, { method:'POST' });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok){ setDetailMsg(data.error || 'Cancel failed', true); return; }
+    closeReservationDetailModal();
+    setMsg('Reservation canceled.');
+    resetForm();
+    calendar.refetchEvents();
+    loadMyPendingReservations();
+    loadSummary();
+  });
+
   loadOwners();
   loadQuoteDraftIfPresent();
   loadMyPendingReservations();
   loadSummary();
+  maybeLoadEditReservationFromQuery();
+  syncSidebarExpansionState();
   calendar.render();
+  scheduleCalendarResize(0);
 })();
 </script>
 {% endblock %}

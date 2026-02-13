@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 import airportsdata
 import certifi
 import db as storage
-from auth import admin_required, hash_password, login_required
+from auth import admin_required, hash_password, login_required, verify_password
 from dotenv import load_dotenv
 from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for
 from routes_auth import create_auth_blueprint
@@ -127,6 +127,19 @@ PLANNER_DRAFT_TTL_SEC = _env_int("TBM_PLANNER_DRAFT_TTL_SEC", 7200)
 
 ICAO_RE = re.compile(r"^[A-Z][A-Z0-9]{3}$")
 AIRPORT_CODE_RE = re.compile(r"^[A-Z0-9]{2,4}$")
+HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+DEFAULT_PENDING_RESERVATION_COLOR = "#9AA2B4"
+OWNER_COLOR_PALETTE = (
+    "#60A5FA",
+    "#34D399",
+    "#FBBF24",
+    "#F472B6",
+    "#A78BFA",
+    "#22D3EE",
+    "#FB923C",
+    "#86EFAC",
+)
 
 AIRPORTS = airportsdata.load("ICAO")
 LID_TO_ICAOS: dict[str, list[str]] = {}
@@ -192,6 +205,7 @@ def _default_runtime_settings() -> dict[str, str]:
         "reservation_max_days": str(RESERVATION_MAX_DAYS),
         "admin_flights_default_scope": "future_only",
         "user_show_closed_default": "false",
+        "pending_reservation_color": DEFAULT_PENDING_RESERVATION_COLOR,
     }
 
 
@@ -255,6 +269,27 @@ def _effective_user_show_closed_default() -> bool:
     return raw in ("1", "true", "yes", "on")
 
 
+def _normalize_hex_color(raw: str | None) -> str | None:
+    value = (raw or "").strip()
+    if not HEX_COLOR_RE.fullmatch(value):
+        return None
+    return value.upper()
+
+
+def _default_owner_color(owner_user_id: int) -> str:
+    return OWNER_COLOR_PALETTE[max(0, int(owner_user_id) - 1) % len(OWNER_COLOR_PALETTE)]
+
+
+def _effective_pending_reservation_color() -> str:
+    configured = _normalize_hex_color(_load_runtime_settings().get("pending_reservation_color"))
+    return configured or DEFAULT_PENDING_RESERVATION_COLOR
+
+
+def _effective_owner_color(owner_user_id: int) -> str:
+    configured = _normalize_hex_color(_load_runtime_settings().get(f"owner_color_{int(owner_user_id)}"))
+    return configured or _default_owner_color(owner_user_id)
+
+
 def _home_zone() -> ZoneInfo:
     try:
         return ZoneInfo(_effective_home_timezone_name())
@@ -272,7 +307,32 @@ def _to_utc_iso(dt: datetime) -> str:
 
 def _utc_iso_to_local_display(iso_value: str) -> str:
     dt = datetime.fromisoformat(iso_value)
-    return dt.astimezone(_home_zone()).strftime("%Y-%m-%d %H:%M")
+    return dt.astimezone(_home_zone()).strftime("%m-%d-%Y %H:%M")
+
+
+def _format_date_display(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        dt = value.astimezone(_home_zone()) if value.tzinfo else value.replace(tzinfo=_home_zone())
+        return dt.strftime("%m-%d-%Y")
+    if isinstance(value, date):
+        return value.strftime("%m-%d-%Y")
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo:
+            parsed = parsed.astimezone(_home_zone())
+        return parsed.strftime("%m-%d-%Y")
+    except Exception:
+        pass
+    try:
+        parsed_date = date.fromisoformat(text)
+        return parsed_date.strftime("%m-%d-%Y")
+    except Exception:
+        return text
 
 
 def _utc_iso_to_local_iso(iso_value: str) -> str:
@@ -398,6 +458,20 @@ def _serialize_user(row) -> dict:
     }
 
 
+def _account_view_context(*, row, form_error: str | None = None, form_success: str | None = None) -> dict:
+    account_user = _serialize_user(row)
+    created_at_utc = row["created_at_utc"] if "created_at_utc" in row.keys() else None
+    created_at_display = _utc_iso_to_local_display(created_at_utc) if created_at_utc else None
+    return {
+        "app_name": APP_NAME,
+        "home_timezone": _effective_home_timezone_name(),
+        "account_user": account_user,
+        "account_created_at_display": created_at_display,
+        "form_error": form_error,
+        "form_success": form_success,
+    }
+
+
 def _can_edit_reservation(user, reservation) -> bool:
     if not user or not reservation:
         return False
@@ -422,20 +496,34 @@ def _can_reopen_reservation(user, reservation) -> bool:
     return user["role"] == "admin" and reservation["status"] in ("denied", "canceled")
 
 
+def _can_cancel_reservation(user, reservation) -> bool:
+    if not user or not reservation:
+        return False
+    if reservation["status"] in ("denied", "canceled"):
+        return False
+    if user["role"] == "admin":
+        return True
+    return reservation["status"] == "pending" and int(reservation["requested_by_user_id"]) == int(user["id"])
+
+
 def _reservation_to_event_payload(row, user) -> dict:
     title = f"{row['traveling_owner_name']} — {row['dep_icao']} → {row['dest_icao']} (Parked: {row['parked_icao']})"
+    status = row["status"]
+    color = _effective_pending_reservation_color() if status == "pending" else _effective_owner_color(int(row["traveling_user_id"]))
     return {
         "id": int(row["id"]),
         "title": title,
         "start": _utc_iso_to_local_iso(row["start_utc"]),
         "end": _utc_iso_to_local_iso(row["end_utc"]),
-        "status": row["status"],
+        "status": status,
+        "display_color": color,
         "dep_icao": row["dep_icao"],
         "dest_icao": row["dest_icao"],
         "parked_icao": row["parked_icao"],
         "traveling_owner": row["traveling_owner_name"],
         "notes": row["notes"] or "",
         "editable": _can_edit_reservation(user, row),
+        "can_cancel": _can_cancel_reservation(user, row),
     }
 
 
@@ -841,6 +929,9 @@ def apply_request_guards():
         if not _verify_csrf_token():
             return render_template("login.html", app_name=APP_NAME, error="Session expired. Please try logging in again."), 403
         return None
+    if endpoint_key == "account_password_post":
+        if getattr(g, "current_user", None) and not _verify_csrf_token():
+            return "Forbidden.", 403
 
     if request.path.startswith("/api/") and getattr(g, "current_user", None):
         if not _verify_csrf_token():
@@ -888,6 +979,7 @@ def inject_template_globals():
         "current_user": getattr(g, "current_user", None),
         "home_timezone": _effective_home_timezone_name(),
         "csrf_token": _get_or_create_csrf_token(),
+        "format_date_display": _format_date_display,
     }
 
 
@@ -2010,7 +2102,12 @@ app.register_blueprint(
 @app.get("/calendar")
 @login_required
 def calendar_page():
-    return render_template("calendar.html", app_name=APP_NAME, home_timezone=_effective_home_timezone_name())
+    return render_template(
+        "calendar.html",
+        app_name=APP_NAME,
+        home_timezone=_effective_home_timezone_name(),
+        reservation_min_minutes=_effective_reservation_min_minutes(),
+    )
 
 
 @app.get("/admin")
@@ -2039,11 +2136,132 @@ def my_flights_page():
     return render_template("my_flights.html", app_name=APP_NAME, home_timezone=_effective_home_timezone_name())
 
 
+@app.get("/account")
+@login_required
+def account_page():
+    with _db_conn() as conn:
+        row = storage.get_user_by_id(conn, int(g.current_user["id"]))
+    if not row:
+        return ("Account not found.", 404)
+    return render_template("account.html", **_account_view_context(row=row))
+
+
+@app.post("/account/password")
+@login_required
+def account_password_post():
+    current_password = str(request.form.get("current_password") or "")
+    new_password = str(request.form.get("new_password") or "")
+    confirm_password = str(request.form.get("confirm_password") or "")
+
+    with _db_conn() as conn:
+        row = storage.get_user_by_id(conn, int(g.current_user["id"]))
+        if not row:
+            return ("Account not found.", 404)
+
+        if not current_password or not new_password or not confirm_password:
+            return render_template(
+                "account.html",
+                **_account_view_context(row=row, form_error="Current password, new password, and confirm password are required."),
+            ), 400
+        if not verify_password(row["password_hash"], current_password):
+            return render_template(
+                "account.html",
+                **_account_view_context(row=row, form_error="Current password is incorrect."),
+            ), 400
+        if len(new_password) < 8:
+            return render_template(
+                "account.html",
+                **_account_view_context(row=row, form_error="New password must be at least 8 characters."),
+            ), 400
+        if new_password != confirm_password:
+            return render_template(
+                "account.html",
+                **_account_view_context(row=row, form_error="New password and confirm password must match."),
+            ), 400
+        if verify_password(row["password_hash"], new_password):
+            return render_template(
+                "account.html",
+                **_account_view_context(row=row, form_error="New password must be different from current password."),
+            ), 400
+
+        storage.set_user_password(conn, int(row["id"]), hash_password(new_password))
+        refreshed = storage.get_user_by_id(conn, int(row["id"]))
+
+    return render_template(
+        "account.html",
+        **_account_view_context(row=refreshed, form_success="Password updated successfully."),
+    )
+
+
+@app.get("/reservations/<int:reservation_id>")
+@login_required
+def reservation_detail_page(reservation_id: int):
+    with _db_conn() as conn:
+        row = storage.get_reservation_by_id(conn, reservation_id)
+    if not row:
+        return ("Reservation not found.", 404)
+
+    if row["status"] not in ("pending", "approved"):
+        return ("Reservation not found.", 404)
+
+    current_user = g.current_user
+    is_owner_scope = (
+        int(row["requested_by_user_id"]) == int(current_user["id"])
+        or int(row["traveling_user_id"]) == int(current_user["id"])
+    )
+    if current_user["role"] != "admin" and not is_owner_scope:
+        return ("Forbidden.", 403)
+
+    reservation = _reservation_payload(row)
+    reservation["created_display"] = _utc_iso_to_local_display(row["created_at_utc"])
+    reservation["updated_display"] = _utc_iso_to_local_display(row["updated_at_utc"])
+    reservation["editable"] = _can_edit_reservation(current_user, row)
+    reservation["can_cancel"] = _can_cancel_reservation(current_user, row)
+    reservation["can_request_change"] = _can_request_change(current_user, row)
+
+    start_local = datetime.fromisoformat(row["start_utc"]).astimezone(_home_zone())
+    estimate = estimate_trip(
+        dep=row["dep_icao"],
+        dest=row["dest_icao"],
+        trip_type="oneway",
+        depart_date=start_local.date(),
+        return_date=None,
+        assumptions=None,
+    )
+    reservation["estimate"] = {
+        "typical_block_time": estimate["totals"]["typical"]["block_time"],
+        "typical_total_cost": money(float(estimate["totals"]["typical"]["costs"]["total"])),
+        "conservative_block_time": estimate["totals"]["conservative"]["block_time"],
+        "conservative_total_cost": money(float(estimate["totals"]["conservative"]["costs"]["total"])),
+    }
+
+    edit_link = url_for(
+        "calendar_page",
+        edit_reservation_id=reservation["id"],
+        edit_start=reservation["start"],
+        edit_end=reservation["end"],
+    )
+
+    return render_template(
+        "reservation_detail.html",
+        app_name=APP_NAME,
+        home_timezone=_effective_home_timezone_name(),
+        reservation=reservation,
+        edit_link=edit_link,
+    )
+
+
 @app.get("/api/owners")
 @login_required
 def api_owners():
     with _db_conn() as conn:
-        owners = [_serialize_user(row) for row in storage.list_owner_users(conn)]
+        owners = []
+        for row in storage.list_owner_users(conn):
+            owner = _serialize_user(row)
+            owner_id = int(owner["id"])
+            owner["default_color"] = _default_owner_color(owner_id)
+            owner["color"] = _effective_owner_color(owner_id)
+            owners.append(owner)
     return jsonify(owners)
 
 
@@ -2114,14 +2332,30 @@ def api_admin_settings_patch():
         "reservation_max_days",
         "admin_flights_default_scope",
         "user_show_closed_default",
+        "pending_reservation_color",
     }
     updates: dict[str, str] = {}
+    owner_color_owner_ids: set[int] = set()
 
     for key, raw_value in data.items():
-        if key not in allowed:
+        is_owner_color = key.startswith("owner_color_")
+        if key not in allowed and not is_owner_color:
             return _json_error(f"Unsupported setting: {key}", 400, "invalid_setting", key)
         value = str(raw_value).strip()
-        if key == "home_timezone":
+        if is_owner_color:
+            owner_id_raw = key.removeprefix("owner_color_")
+            try:
+                owner_id = int(owner_id_raw)
+            except Exception:
+                return _json_error("owner color key must be owner_color_<owner_id>.", 400, "invalid_setting", key)
+            if owner_id < 1:
+                return _json_error("owner color key must use a positive owner id.", 400, "invalid_setting", key)
+            normalized = _normalize_hex_color(value)
+            if not normalized:
+                return _json_error("owner colors must be hex values like #A1B2C3.", 400, "invalid_setting", key)
+            owner_color_owner_ids.add(owner_id)
+            value = normalized
+        elif key == "home_timezone":
             try:
                 ZoneInfo(value)
             except Exception:
@@ -2151,6 +2385,11 @@ def api_admin_settings_patch():
             if value not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
                 return _json_error("user_show_closed_default must be a boolean-like value.", 400, "invalid_setting", key)
             value = "true" if value in ("true", "1", "yes", "on") else "false"
+        elif key == "pending_reservation_color":
+            normalized = _normalize_hex_color(value)
+            if not normalized:
+                return _json_error("pending_reservation_color must be a hex value like #A1B2C3.", 400, "invalid_setting", key)
+            value = normalized
         updates[key] = value
 
     if updates:
@@ -2174,6 +2413,10 @@ def api_admin_settings_patch():
         return jsonify({"ok": True, "settings": _load_runtime_settings(force=True)})
 
     with _db_conn() as conn:
+        for owner_id in owner_color_owner_ids:
+            owner = storage.get_user_by_id(conn, owner_id)
+            if not owner or owner["role"] != "owner":
+                return _json_error("owner color keys must reference an existing owner user id.", 400, "invalid_setting")
         storage.upsert_settings_with_audit(conn, updates, updated_by_user_id=int(g.current_user["id"]))
     _invalidate_settings_cache()
     return jsonify({"ok": True, "settings": _load_runtime_settings(force=True)})
@@ -2303,6 +2546,8 @@ def api_address_suggest():
 
 @app.get("/api/nearest-airports")
 def api_nearest_airports():
+    min_runway_ft_explicit = (request.args.get("min_runway_ft") or "").strip() != ""
+
     limit, err = _parse_int_query_arg("limit", 8, 1, 25)
     if err:
         return _json_error(err["message"], err["status"], err["code"], err.get("field"))
@@ -2345,8 +2590,11 @@ def api_nearest_airports():
         metadata = fetch_airport_ops_metadata([item["icao"] for item in nearest])
 
         enriched = []
+        metadata_coverage = 0
         for item in nearest:
             ops = metadata.get(item["icao"], {})
+            if ops:
+                metadata_coverage += 1
             merged = dict(item)
             merged.update(
                 {
@@ -2359,9 +2607,16 @@ def api_nearest_airports():
             )
             enriched.append(merged)
 
+        # If ops metadata could not be fetched at all (network outage/proxy block),
+        # keep default lookups functional by avoiding the default runway-length filter.
+        # Explicit runway filters from the caller are still honored.
+        effective_min_runway_ft = min_runway_ft
+        if metadata_coverage == 0 and not min_runway_ft_explicit:
+            effective_min_runway_ft = 0
+
         filtered = _apply_nearest_filters(
             items=enriched,
-            min_runway_ft=min_runway_ft,
+            min_runway_ft=effective_min_runway_ft,
             jet_fuel_only=jet_fuel_only,
             paved_only=paved_only,
             towered_only=towered_only,

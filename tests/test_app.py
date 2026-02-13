@@ -350,3 +350,105 @@ def test_planner_routes_require_login(planner_auth_env):
         },
     )
     assert estimate_api.status_code == 401
+
+
+def test_account_page_requires_login(planner_auth_env):
+    client = tbm_app.app.test_client()
+    resp = client.get("/account")
+    assert resp.status_code == 302
+    assert "/login" in resp.headers.get("Location", "")
+
+
+def test_account_page_renders_profile(planner_auth_env):
+    client = tbm_app.app.test_client()
+    assert _login(client).status_code == 200
+    resp = client.get("/account")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "Profile" in body
+    assert "owner@example.com" in body
+
+
+def test_account_password_change_validations(planner_auth_env):
+    client = tbm_app.app.test_client()
+    assert _login(client).status_code == 200
+    with client.session_transaction() as sess:
+        csrf_token = sess.get("csrf_token")
+
+    wrong_current = client.post(
+        "/account/password",
+        data={
+            "csrf_token": csrf_token,
+            "current_password": "wrong-password",
+            "new_password": "newownerpass123",
+            "confirm_password": "newownerpass123",
+        },
+    )
+    assert wrong_current.status_code == 400
+    assert "Current password is incorrect." in wrong_current.get_data(as_text=True)
+
+    mismatch = client.post(
+        "/account/password",
+        data={
+            "csrf_token": csrf_token,
+            "current_password": "ownerpass123",
+            "new_password": "newownerpass123",
+            "confirm_password": "mismatch123",
+        },
+    )
+    assert mismatch.status_code == 400
+    assert "must match" in mismatch.get_data(as_text=True)
+
+    weak = client.post(
+        "/account/password",
+        data={
+            "csrf_token": csrf_token,
+            "current_password": "ownerpass123",
+            "new_password": "short",
+            "confirm_password": "short",
+        },
+    )
+    assert weak.status_code == 400
+    assert "at least 8 characters" in weak.get_data(as_text=True)
+
+
+def test_account_password_change_success_and_login_with_new_password(planner_auth_env):
+    client = tbm_app.app.test_client()
+    assert _login(client).status_code == 200
+    with client.session_transaction() as sess:
+        csrf_token = sess.get("csrf_token")
+
+    changed = client.post(
+        "/account/password",
+        data={
+            "csrf_token": csrf_token,
+            "current_password": "ownerpass123",
+            "new_password": "newownerpass123",
+            "confirm_password": "newownerpass123",
+        },
+    )
+    assert changed.status_code == 200
+    assert "Password updated successfully." in changed.get_data(as_text=True)
+
+    old_login_client = tbm_app.app.test_client()
+    old_login = old_login_client.post("/api/login", json={"email": "owner@example.com", "password": "ownerpass123"})
+    assert old_login.status_code == 401
+
+    new_login_client = tbm_app.app.test_client()
+    new_login = new_login_client.post("/api/login", json={"email": "owner@example.com", "password": "newownerpass123"})
+    assert new_login.status_code == 200
+
+
+def test_account_password_change_requires_csrf(planner_auth_env):
+    client = tbm_app.app.test_client()
+    login = client.post("/api/login", json={"email": "owner@example.com", "password": "ownerpass123"})
+    assert login.status_code == 200
+    resp = client.post(
+        "/account/password",
+        data={
+            "current_password": "ownerpass123",
+            "new_password": "newownerpass123",
+            "confirm_password": "newownerpass123",
+        },
+    )
+    assert resp.status_code == 403

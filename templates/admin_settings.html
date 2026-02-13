@@ -12,6 +12,33 @@
 .meta{color:var(--muted);font-size:12px;margin-top:8px;white-space:pre-wrap}
 .item{border-top:1px solid rgba(255,255,255,.08);padding:8px 0}
 .item:first-child{border-top:0}
+.ownerColorSection{margin-top:14px}
+.ownerColorGrid{display:grid;gap:8px}
+.ownerColorRow{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:8px 0;border-top:1px solid rgba(255,255,255,.08)}
+.ownerColorRow:first-child{border-top:0}
+.ownerColorName{font-size:13px}
+.colorValue{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.field input[type="color"]{
+  width:100%;
+  height:42px;
+  padding:2px;
+  border:1px solid rgba(255,255,255,.18);
+  border-radius:10px;
+  background:transparent;
+  cursor:pointer;
+  appearance:none;
+  -webkit-appearance:none;
+}
+.field input[type="color"]::-webkit-color-swatch-wrapper{padding:0}
+.field input[type="color"]::-webkit-color-swatch{border:1px solid rgba(0,0,0,.22);border-radius:8px}
+.field input[type="color"]::-moz-color-swatch{border:1px solid rgba(0,0,0,.22);border-radius:8px}
+.ownerColorInput{
+  width:56px !important;
+  min-width:56px;
+  height:36px !important;
+  padding:2px !important;
+  border-radius:10px !important;
+}
 {% endblock %}
 {% block content %}
 <section class="panel">
@@ -21,6 +48,13 @@
     <div class="field"><label for="reservation_max_days">Max Reservation Days</label><input id="reservation_max_days" type="number" min="1" /></div>
     <div class="field"><label for="admin_flights_default_scope">Admin Flights Default Scope</label><select id="admin_flights_default_scope" class="js-custom-select"><option value="future_only">Future Only</option><option value="all">All History</option></select></div>
     <div class="field"><label for="user_show_closed_default">User Show Closed Default</label><select id="user_show_closed_default" class="js-custom-select"><option value="false">False</option><option value="true">True</option></select></div>
+    <div class="field"><label for="pending_reservation_color">Pending Reservation Color</label><input id="pending_reservation_color" type="color" value="#9AA2B4" /></div>
+  </div>
+  <div class="ownerColorSection">
+    <h3 style="margin:0 0 6px;">Owner Reservation Colors</h3>
+    <div id="ownerColorsWrap" class="ownerColorGrid">
+      <div class="meta">Loading owners...</div>
+    </div>
   </div>
   <div style="margin-top:10px;"><button id="saveBtn" class="btn" type="button">Save Settings</button></div>
   <div id="msg" class="meta"></div>
@@ -33,19 +67,77 @@
 {% block scripts %}
 <script>
 (() => {
-  const fields = ['home_timezone', 'reservation_min_minutes', 'reservation_max_days', 'admin_flights_default_scope', 'user_show_closed_default'];
+  const fields = ['home_timezone', 'reservation_min_minutes', 'reservation_max_days', 'admin_flights_default_scope', 'user_show_closed_default', 'pending_reservation_color'];
   const msg = document.getElementById('msg');
   const historyList = document.getElementById('historyList');
+  const ownerColorsWrap = document.getElementById('ownerColorsWrap');
+  let owners = [];
+  let settings = {};
 
   function setMsg(text, bad){ msg.textContent = text || ''; msg.style.color = bad ? '#ffd8de' : 'var(--muted)'; }
+  function normalizeColor(value, fallback = '#9AA2B4'){
+    const raw = String(value || '').trim();
+    return /^#[0-9A-Fa-f]{6}$/.test(raw) ? raw.toUpperCase() : fallback;
+  }
+  function ownerSettingKey(ownerId){ return `owner_color_${ownerId}`; }
+
+  function renderOwnerColors(){
+    if(!owners.length){
+      ownerColorsWrap.innerHTML = '<div class="meta">No owner users found.</div>';
+      return;
+    }
+    ownerColorsWrap.innerHTML = owners.map((owner)=>{
+      const key = ownerSettingKey(owner.id);
+      const fallback = normalizeColor(owner.default_color, '#60A5FA');
+      const color = normalizeColor(settings[key] || owner.color || fallback, fallback);
+      const safeName = String(owner.name || '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+      const safeEmail = String(owner.email || '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+      return `
+        <div class="ownerColorRow">
+          <div class="ownerColorName">${safeName} (${safeEmail})</div>
+          <input class="ownerColorInput" type="color" data-owner-color-key="${key}" value="${color}" />
+          <div class="colorValue" data-owner-color-label="${key}">${color}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  ownerColorsWrap.addEventListener('input', (event)=>{
+    const target = event.target;
+    if(!(target instanceof HTMLInputElement)) return;
+    const key = target.getAttribute('data-owner-color-key');
+    if(!key) return;
+    const normalized = normalizeColor(target.value, '#9AA2B4');
+    const label = ownerColorsWrap.querySelector(`[data-owner-color-label="${key}"]`);
+    if(label) label.textContent = normalized;
+    settings[key] = normalized;
+  });
 
   async function loadSettings(){
     const resp = await fetch('/api/admin/settings');
     if(!resp.ok){ setMsg('Could not load settings', true); return; }
     const data = await resp.json();
-    const s = data.settings || {};
-    fields.forEach((k)=>{ const el = document.getElementById(k); if(el) el.value = s[k] ?? ''; });
+    settings = data.settings || {};
+    fields.forEach((k)=>{
+      const el = document.getElementById(k);
+      if(!el) return;
+      if(k === 'pending_reservation_color'){
+        el.value = normalizeColor(settings[k], '#9AA2B4');
+      } else {
+        el.value = settings[k] ?? '';
+      }
+    });
     setMsg('Loaded settings.');
+  }
+
+  async function loadOwners(){
+    const resp = await fetch('/api/owners');
+    if(!resp.ok){
+      ownerColorsWrap.innerHTML = '<div class="meta">Could not load owners.</div>';
+      return;
+    }
+    owners = await resp.json();
+    renderOwnerColors();
   }
 
   async function loadHistory(){
@@ -66,16 +158,21 @@
   document.getElementById('saveBtn').addEventListener('click', async ()=>{
     const payload = {};
     fields.forEach((k)=>{ const el = document.getElementById(k); if(el) payload[k] = el.value; });
+    owners.forEach((owner)=>{
+      const key = ownerSettingKey(owner.id);
+      const input = ownerColorsWrap.querySelector(`input[data-owner-color-key="${key}"]`);
+      payload[key] = normalizeColor(input ? input.value : settings[key] || owner.color || owner.default_color, owner.default_color || '#60A5FA');
+    });
     const resp = await fetch('/api/admin/settings', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     const data = await resp.json().catch(()=>({}));
     if(!resp.ok){ setMsg(data.error || 'Save failed', true); return; }
     setMsg('Settings saved.');
-    loadSettings();
+    loadSettings().then(renderOwnerColors);
     loadHistory();
   });
 
   if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
-  loadSettings();
+  loadSettings().then(loadOwners);
   loadHistory();
 })();
 </script>

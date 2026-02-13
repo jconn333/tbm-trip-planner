@@ -10,6 +10,23 @@
     return { date: `${year}-${month}-${day}`, time: `${hour}:${minute}` };
   }
 
+  function formatLocalIsoDisplay(value, options = {}){
+    const includeTime = options.includeTime !== false;
+    const text = String(value || '').trim();
+    if(!text) return '';
+    const dateObj = new Date(text);
+    if(Number.isNaN(dateObj.getTime())) return text;
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    const year = dateObj.getFullYear();
+    if(!includeTime){
+      return `${month}-${day}-${year}`;
+    }
+    const hour = String(dateObj.getHours()).padStart(2, '0');
+    const minute = String(dateObj.getMinutes()).padStart(2, '0');
+    return `${month}-${day}-${year} ${hour}:${minute}`;
+  }
+
   function toQuarterHour(timeValue){
     const parts = String(timeValue || '').split(':');
     if(parts.length < 2) return '';
@@ -24,7 +41,7 @@
     return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
   }
 
-  function initQuarterHourSelect(selectEl, placeholder = 'Select time', defaultValue = '06:00'){
+  function initQuarterHourSelect(selectEl, placeholder = 'Select a Time', defaultValue = ''){
     if(!(selectEl instanceof HTMLSelectElement)) return;
     const previousValue = selectEl.value;
     selectEl.innerHTML = `<option value="">${placeholder}</option>`;
@@ -182,6 +199,7 @@
 
   window.TBMReservationUI = Object.assign({}, window.TBMReservationUI || {}, {
     splitIsoToDateTime,
+    formatLocalIsoDisplay,
     toQuarterHour,
     initQuarterHourSelect,
     setupAirportAutocomplete,
