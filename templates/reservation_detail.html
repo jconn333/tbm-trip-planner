@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Reservation #{{ reservation.id }} · {{ app_name }}{% endblock %}
+{% block header_subtitle %}Reservation lifecycle details and planning snapshot.{% endblock %}
+{% block page_styles %}
+.layout{display:grid;grid-template-columns:1fr;gap:12px}
+.panel{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);border-radius:16px;padding:14px}
+.panel h3{margin:0 0 10px;font-size:16px}
+.meta{font-size:12px;color:var(--muted)}
+.kvGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.btn{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--text);border-radius:999px;padding:7px 11px;cursor:pointer;font-size:12px;text-decoration:none}
+.btn.primary{border-color:rgba(124,242,194,.45);background:rgba(124,242,194,.18)}
+.btn.danger{border-color:rgba(255,92,112,.55);background:rgba(255,92,112,.18)}
+.statusPill{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.18);font-size:11px;font-weight:700;letter-spacing:.01em;text-transform:uppercase}
+.noteBox{white-space:pre-wrap}
+.msg{font-size:12px;color:var(--muted);min-height:16px;margin-top:8px}
+@media (max-width:840px){.kvGrid{grid-template-columns:1fr}}
+{% endblock %}
+{% block content %}
+<section class="layout">
+  <div class="panel">
+    <h3>Reservation #{{ reservation.id }}</h3>
+    <div class="meta">
+      <span class="statusPill">{{ reservation.status }}</span>
+      <span style="margin-left:8px;">Display timezone: {{ home_timezone }}</span>
+    </div>
+    <div class="kvGrid" style="margin-top:12px;">
+      <div><strong>Owner</strong><div class="meta">{{ reservation.traveling_owner }}</div></div>
+      <div><strong>Requested By</strong><div class="meta">{{ reservation.requested_by }}</div></div>
+      <div><strong>Route</strong><div class="meta">{{ reservation.dep_icao }} -> {{ reservation.dest_icao }}</div></div>
+      <div><strong>Parked</strong><div class="meta">{{ reservation.parked_icao }}</div></div>
+      <div><strong>Start</strong><div class="meta">{{ reservation.start_display }}</div></div>
+      <div><strong>End</strong><div class="meta">{{ reservation.end_display }}</div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Notes and Lifecycle</h3>
+    <div class="noteBox">{{ reservation.notes or "(No notes)" }}</div>
+    <div class="meta" style="margin-top:10px;">Created: {{ reservation.created_display }}</div>
+    <div class="meta">Updated: {{ reservation.updated_display }}</div>
+  </div>
+
+  <div class="panel">
+    <h3>Planning Snapshot</h3>
+    <p class="meta">Planning snapshot for this booked trip.</p>
+    <div class="kvGrid" style="margin-top:10px;">
+      <div>
+        <strong>Typical</strong>
+        <div class="meta">{{ reservation.estimate.typical_block_time }} · {{ reservation.estimate.typical_total_cost }}</div>
+      </div>
+      <div>
+        <strong>Conservative</strong>
+        <div class="meta">{{ reservation.estimate.conservative_block_time }} · {{ reservation.estimate.conservative_total_cost }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Actions</h3>
+    <div class="actions">
+      {% if reservation.editable %}
+        <a class="btn primary" href="{{ edit_link }}">Edit Reservation</a>
+      {% endif %}
+      {% if reservation.can_cancel %}
+        <button class="btn danger" id="cancelBtn" type="button">Cancel</button>
+      {% endif %}
+      {% if reservation.can_request_change %}
+        {% if current_user and current_user.role == 'admin' %}
+          <a class="btn" href="/admin/flights">Request Change (Admin)</a>
+        {% else %}
+          <a class="btn" href="/my-flights">Request Change</a>
+        {% endif %}
+      {% endif %}
+      <a class="btn" href="/calendar">Back to Calendar</a>
+      <a class="btn" href="/my-flights">Back to My Flights</a>
+    </div>
+    <div id="msg" class="msg"></div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const cancelBtn = document.getElementById('cancelBtn');
+  const msg = document.getElementById('msg');
+  if(!cancelBtn) return;
+
+  function setMsg(text, bad){
+    msg.textContent = text || '';
+    msg.style.color = bad ? '#ffd8de' : 'var(--muted)';
+  }
+
+  cancelBtn.addEventListener('click', async () => {
+    const resp = await fetch('/api/reservations/{{ reservation.id }}/cancel', { method:'POST' });
+    const data = await resp.json().catch(() => ({}));
+    if(!resp.ok){
+      setMsg(data.error || 'Cancel failed.', true);
+      return;
+    }
+    window.location.href = '/my-flights';
+  });
+})();
+</script>
+{% endblock %}

@@ -9,8 +9,70 @@
 input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);background:rgba(8,14,28,.5);color:var(--text);border-radius:10px;padding:8px 10px}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
 .btn{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--text);border-radius:999px;padding:7px 11px;cursor:pointer;font-size:12px}
-.item{border-top:1px solid rgba(255,255,255,.08);padding:10px 0}
-.item:first-child{border-top:0}
+.cardList{display:grid;gap:12px}
+.flightCard{
+  border:1px solid color-mix(in srgb, var(--color-border) 84%, white);
+  border-radius:14px;
+  background:color-mix(in srgb, var(--color-surface-soft) 42%, white);
+  padding:14px;
+  transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease, background-color .16s ease;
+}
+.flightCard:hover,
+.flightCard:focus-within{
+  transform:translateY(-2px);
+  border-color:color-mix(in srgb, var(--color-accent-strong) 26%, var(--color-border));
+  box-shadow:0 4px 12px rgba(22,51,0,.08);
+  background:color-mix(in srgb, var(--color-surface-soft) 62%, white);
+}
+.flightCardHead{display:grid;gap:6px}
+.flightTop{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.flightRoute{
+  margin:0;
+  color:var(--color-text-strong);
+  font-size:1rem;
+  font-weight:650;
+  letter-spacing:.01em;
+}
+.flightWhen{
+  margin:0;
+  color:var(--color-text-strong);
+  font-size:14px;
+  line-height:1.45;
+  font-weight:620;
+}
+.flightOwnerRow{
+  color:var(--color-text-strong);
+  font-size:13.5px;
+  line-height:1.45;
+  font-weight:620;
+  margin-top:8px;
+}
+.flightOwnerRow strong{
+  font-weight:700;
+}
+.flightSupportMeta{
+  color:var(--muted);
+  font-size:12px;
+  margin-top:6px;
+}
+.flightMeta{color:var(--muted);font-size:12px;margin-top:8px}
+.flightActions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.statusChip{
+  display:inline-flex;
+  align-items:center;
+  border:1px solid transparent;
+  border-radius:999px;
+  padding:2px 8px;
+  font-size:10.5px;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  font-weight:650;
+  white-space:nowrap;
+}
+.statusPending{background:color-mix(in srgb, #9aa2b4 20%, white);border-color:color-mix(in srgb, #9aa2b4 36%, white);color:#4d5669}
+.statusApproved{background:color-mix(in srgb, #60b95f 20%, white);border-color:color-mix(in srgb, #60b95f 34%, white);color:#2e6a2f}
+.statusDenied,.statusCanceled{background:color-mix(in srgb, #c57b7b 18%, white);border-color:color-mix(in srgb, #c57b7b 34%, white);color:#7b3a3a}
+.statusApplied{background:color-mix(in srgb, #7a9bc5 20%, white);border-color:color-mix(in srgb, #7a9bc5 34%, white);color:#35587c}
 .meta{color:var(--muted);font-size:12px;margin-top:4px}
 .pager{display:flex;align-items:center;justify-content:space-between;margin-top:10px}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:40}
@@ -25,9 +87,12 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
 .airportSuggestions.open{display:block}
 .airportOption{width:100%;border:0;border-top:1px solid rgba(255,255,255,.08);background:transparent;color:var(--text);text-align:left;padding:8px 10px;cursor:pointer;font-size:12px}
 .airportOption:first-child{border-top:0}
-.reviewItem{border-top:1px solid rgba(255,255,255,.08);padding:10px 0}
-.reviewItem:first-child{border-top:0}
+.reviewItem{border-top:0;padding:0}
 .msg{font-size:12px;color:var(--muted);min-height:16px}
+@media (max-width:560px){
+  .flightTop{align-items:flex-start;flex-direction:column}
+  .flightActions .btn{width:100%}
+}
 {% endblock %}
 {% block content %}
 <section class="grid">
@@ -50,7 +115,7 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
   </div>
 
   <div class="panel">
-    <div id="list"></div>
+    <div id="list" class="cardList"></div>
     <div class="pager">
       <button class="btn" id="prevPage" type="button">Prev</button>
       <div id="pageMeta" class="meta"></div>
@@ -153,7 +218,7 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
   }
 
   function initQuarterHourSelect(selectEl){
-    if(window.TBMReservationUI){ window.TBMReservationUI.initQuarterHourSelect(selectEl, 'Select time'); }
+    if(window.TBMReservationUI){ window.TBMReservationUI.initQuarterHourSelect(selectEl, 'Select a Time'); }
   }
 
   function setupAirportAutocomplete(input, suggestionsEl){
@@ -252,6 +317,21 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
     } catch(_) {}
   }
 
+  function formatLocalDateTime(value){
+    if(window.TBMReservationUI){ return window.TBMReservationUI.formatLocalIsoDisplay(value); }
+    return String(value || '').slice(0,16).replace('T',' ');
+  }
+
+  function statusClass(status){
+    const normalized = String(status || '').toLowerCase();
+    if(normalized === 'pending') return 'statusPending';
+    if(normalized === 'approved') return 'statusApproved';
+    if(normalized === 'denied') return 'statusDenied';
+    if(normalized === 'canceled') return 'statusCanceled';
+    if(normalized === 'applied') return 'statusApplied';
+    return 'statusPending';
+  }
+
   async function loadFlights(){
     const resp = await fetch(`/api/admin/flights?${buildParams().toString()}`);
     if(!resp.ok){ el.list.innerHTML = '<div class="meta">Failed to load flights.</div>'; return; }
@@ -261,13 +341,20 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
     if(!loadedItems.length){ el.list.innerHTML = '<div class="meta">No flights found.</div>'; }
     else {
       el.list.innerHTML = loadedItems.map((item)=>`
-        <div class="item">
-          <div><strong>#${item.id}</strong> ${item.status.toUpperCase()} | ${item.dep_icao} -> ${item.dest_icao} (Parked: ${item.parked_icao})</div>
-          <div class="meta">${item.start_display} to ${item.end_display} | Owner: ${item.traveling_owner} | Requested by: ${item.requested_by}</div>
-          <div class="meta">Created: ${item.created_at} | Updated: ${item.updated_at}${item.decision_at ? ` | Decision: ${item.decision_at}` : ''}</div>
-          <div class="meta">${item.notes || ''}</div>
-          <div class="actions" style="margin-top:8px;">${itemActions(item)}</div>
-        </div>
+        <article class="flightCard">
+          <div class="flightCardHead">
+            <div class="flightTop">
+              <p class="flightRoute">${item.dep_icao} → ${item.dest_icao}</p>
+              <span class="statusChip ${statusClass(item.status)}">${item.status.toUpperCase()}</span>
+            </div>
+            <p class="flightWhen">${item.start_display} to ${item.end_display}</p>
+          </div>
+          <div class="flightOwnerRow">Owner: <strong>${item.traveling_owner}</strong></div>
+          <div class="flightSupportMeta">Requested by: ${item.requested_by} | Parked: ${item.parked_icao}</div>
+          <div class="flightMeta">Created: ${formatLocalDateTime(item.created_at)} | Updated: ${formatLocalDateTime(item.updated_at)}${item.decision_at ? ` | Decision: ${formatLocalDateTime(item.decision_at)}` : ''}</div>
+          <div class="flightMeta">${item.notes || ''}</div>
+          <div class="flightActions">${itemActions(item)}</div>
+        </article>
       `).join('');
     }
     const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -311,13 +398,18 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
       return;
     }
     el.changesBody.innerHTML = rows.map((row)=>`
-      <div class="reviewItem">
-        <div><strong>#${row.id}</strong> ${row.status.toUpperCase()} | ${row.proposed_dep_icao} -> ${row.proposed_dest_icao}</div>
-        <div class="meta">${row.proposed_start.slice(0,16).replace('T',' ')} to ${row.proposed_end.slice(0,16).replace('T',' ')}</div>
-        <div class="meta">Requester: ${row.requested_by}</div>
-        <div class="meta">${row.proposed_notes || ''}</div>
+      <article class="reviewItem flightCard">
+        <div class="flightCardHead">
+          <div class="flightTop">
+            <p class="flightRoute">${row.proposed_dep_icao} → ${row.proposed_dest_icao}</p>
+            <span class="statusChip ${statusClass(row.status)}">${row.status.toUpperCase()}</span>
+          </div>
+          <p class="flightWhen">${formatLocalDateTime(row.proposed_start)} to ${formatLocalDateTime(row.proposed_end)}</p>
+        </div>
+        <div class="flightMeta">Requester: ${row.requested_by}</div>
+        <div class="flightMeta">${row.proposed_notes || ''}</div>
         ${row.status === 'pending' ? `
-          <div class="actions" style="margin-top:8px;">
+          <div class="flightActions">
             <button class="btn" data-cr-action="approve" data-res-id="${reservationId}" data-request-id="${row.id}">Approve</button>
             <button class="btn" data-cr-action="deny" data-res-id="${reservationId}" data-request-id="${row.id}">Deny</button>
           </div>
@@ -326,7 +418,7 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
             <input type="text" id="deny-note-${row.id}" placeholder="Denied because..." />
           </div>
         ` : `<div class="meta">Decision note: ${row.decision_note || '-'}</div>`}
-      </div>
+      </article>
     `).join('');
     openModal(el.changesModal);
   }

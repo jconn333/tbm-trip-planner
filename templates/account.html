@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Account · {{ app_name }}{% endblock %}
+{% block page_styles %}
+.accountGrid {
+  display: grid;
+  gap: 16px;
+}
+.accountCard {
+  padding: 18px;
+}
+.accountCard h2 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+}
+.accountMetaRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) 1fr;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--color-border);
+}
+.accountMetaRow:first-of-type {
+  border-top: 0;
+}
+.accountMetaLabel {
+  font-size: 0.84rem;
+  color: var(--color-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.accountMetaValue {
+  font-size: 0.95rem;
+  color: var(--color-text);
+}
+.formGrid {
+  display: grid;
+  gap: 10px;
+}
+.actions {
+  margin-top: 6px;
+  display: flex;
+  justify-content: flex-start;
+}
+@media (max-width: 720px) {
+  .accountMetaRow {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+{% endblock %}
+{% block content %}
+<section class="accountGrid">
+  <article class="panel accountCard">
+    <h2>Profile</h2>
+    <div class="accountMetaRow">
+      <div class="accountMetaLabel">Name</div>
+      <div class="accountMetaValue">{{ account_user.name }}</div>
+    </div>
+    <div class="accountMetaRow">
+      <div class="accountMetaLabel">Email</div>
+      <div class="accountMetaValue">{{ account_user.email }}</div>
+    </div>
+    <div class="accountMetaRow">
+      <div class="accountMetaLabel">Role</div>
+      <div class="accountMetaValue">{{ account_user.role|upper }}</div>
+    </div>
+    <div class="accountMetaRow">
+      <div class="accountMetaLabel">Created</div>
+      <div class="accountMetaValue">{{ account_created_at_display or "—" }}</div>
+    </div>
+  </article>
+
+  <article class="panel accountCard">
+    <h2>Change Password</h2>
+    <p class="uiMeta">Use your current password to confirm this change.</p>
+    {% if form_error %}
+      <div class="msg is-error">{{ form_error }}</div>
+    {% endif %}
+    {% if form_success %}
+      <div class="msg">{{ form_success }}</div>
+    {% endif %}
+    <form method="post" action="/account/password" class="formGrid">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div class="field">
+        <label for="currentPassword">Current password</label>
+        <input id="currentPassword" name="current_password" type="password" autocomplete="current-password" required />
+      </div>
+      <div class="field">
+        <label for="newPassword">New password</label>
+        <input id="newPassword" name="new_password" type="password" autocomplete="new-password" minlength="8" required />
+      </div>
+      <div class="field">
+        <label for="confirmPassword">Confirm new password</label>
+        <input id="confirmPassword" name="confirm_password" type="password" autocomplete="new-password" minlength="8" required />
+      </div>
+      <div class="actions">
+        <button type="submit" class="btn">Update Password</button>
+      </div>
+    </form>
+  </article>
+</section>
+{% endblock %}

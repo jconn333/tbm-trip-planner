@@ -97,17 +97,25 @@ def test_admin_settings_get_and_patch(tmp_path, monkeypatch):
 
     patched = client.patch(
         "/api/admin/settings",
-        json={"reservation_min_minutes": "30", "admin_flights_default_scope": "all"},
+        json={
+            "reservation_min_minutes": "30",
+            "admin_flights_default_scope": "all",
+            "pending_reservation_color": "#808080",
+            "owner_color_2": "#4AA3DF",
+        },
     )
     assert patched.status_code == 200
     patched_data = patched.get_json()
     assert patched_data["settings"]["reservation_min_minutes"] == "30"
     assert patched_data["settings"]["admin_flights_default_scope"] == "all"
+    assert patched_data["settings"]["pending_reservation_color"] == "#808080"
+    assert patched_data["settings"]["owner_color_2"] == "#4AA3DF"
 
     history = client.get("/api/admin/settings/history")
     assert history.status_code == 200
     history_rows = history.get_json()["items"]
     assert any(row["key"] == "reservation_min_minutes" and row["new_value"] == "30" for row in history_rows)
+    assert any(row["key"] == "pending_reservation_color" and row["new_value"] == "#808080" for row in history_rows)
 
 
 def test_admin_settings_dependency_validation(tmp_path, monkeypatch):
@@ -121,6 +129,13 @@ def test_admin_settings_dependency_validation(tmp_path, monkeypatch):
     )
     assert bad.status_code == 400
     assert bad.get_json()["code"] == "invalid_setting"
+
+    bad_color = client.patch(
+        "/api/admin/settings",
+        json={"pending_reservation_color": "gray"},
+    )
+    assert bad_color.status_code == 400
+    assert bad_color.get_json()["code"] == "invalid_setting"
 
 
 def test_admin_flights_defaults_to_future_only(tmp_path, monkeypatch):

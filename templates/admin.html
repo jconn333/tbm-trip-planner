@@ -68,6 +68,11 @@
     el.style.color = bad ? '#ffd8de' : 'var(--muted)';
   }
 
+  function formatLocalDateTime(value){
+    if(window.TBMReservationUI){ return window.TBMReservationUI.formatLocalIsoDisplay(value); }
+    return String(value || '').slice(0,16).replace('T',' ');
+  }
+
   async function loadPending() {
     const resp = await fetch('/api/pending-reservations');
     if (!resp.ok) {
@@ -85,7 +90,7 @@
       node.className = 'row';
       node.innerHTML = `
         <div><strong>${row.traveling_owner}</strong> - ${row.dep_icao} -> ${row.dest_icao} (Parked: ${row.parked_icao})</div>
-        <div class="muted">${row.start.slice(0,16).replace('T',' ')} to ${row.end.slice(0,16).replace('T',' ')} | Requested by ${row.requested_by}</div>
+        <div class="muted">${formatLocalDateTime(row.start)} to ${formatLocalDateTime(row.end)} | Requested by ${row.requested_by}</div>
         <div class="muted">${row.notes || ''}</div>
         <div class="actions">
           <button class="btn ok" data-action="approve" data-id="${row.id}">Approve</button>

@@ -59,6 +59,20 @@ def live_server(tmp_path, monkeypatch):
             requested_by_user_id=int(owner["id"]),
             notes="Playwright test reservation",
         )
+        storage.create_reservation(
+            conn,
+            status="approved",
+            start_utc=(datetime.now(tbm_app.ZoneInfo("UTC")) + timedelta(days=4)).isoformat(),
+            end_utc=(datetime.now(tbm_app.ZoneInfo("UTC")) + timedelta(days=4, hours=2)).isoformat(),
+            dep_icao="KSRQ",
+            dest_icao="KCAK",
+            parked_icao="KCAK",
+            traveling_user_id=int(owner["id"]),
+            requested_by_user_id=int(owner["id"]),
+            approved_by_user_id=int(admin["id"]),
+            decision_at_utc=datetime.now(tbm_app.ZoneInfo("UTC")).isoformat(),
+            notes="Playwright approved reservation",
+        )
     tbm_app._invalidate_settings_cache()
 
     tbm_app.app.config["TESTING"] = True
@@ -140,4 +154,46 @@ def test_my_flights_modal_datetime_box_click_focus(live_server):
         page.click('[data-dt-box="modal-start"]', position={"x": 2, "y": 2})
         second_focus = page.evaluate("document.activeElement && document.activeElement.id")
         assert second_focus == "modalStartTime"
+        browser.close()
+
+
+def test_calendar_reservation_details_modal_and_view_detail(live_server):
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        _login(context, live_server, "owner@example.com", "ownerpass123")
+        page = context.new_page()
+        page.goto(f"{live_server}/calendar")
+        page.wait_for_selector(".fc-event")
+
+        pending_event = page.locator(".fc-event", has_text="KCAK → KSRQ").first
+        pending_event.click()
+        page.wait_for_selector("#reservationDetailModal.open")
+
+        assert page.locator("#detailViewBtn").is_visible()
+        assert page.locator("#detailCancelBtn.is-hidden").count() == 0
+        assert page.locator("#detailEditBtn.is-hidden").count() == 0
+
+        page.click("#detailViewBtn")
+        page.wait_for_url("**/reservations/*")
+        page.wait_for_selector("text=Planning snapshot for this booked trip.")
+        browser.close()
+
+
+def test_my_flights_view_more_detail_buttons(live_server):
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        _login(context, live_server, "owner@example.com", "ownerpass123")
+        page = context.new_page()
+        page.goto(f"{live_server}/my-flights")
+        page.wait_for_selector('[data-action="view-detail"][data-list="pending"]')
+        page.wait_for_selector('[data-action="view-detail"][data-list="approved"]')
+
+        assert page.locator('[data-action="view-detail"][data-list="pending"]').count() >= 1
+        assert page.locator('[data-action="view-detail"][data-list="approved"]').count() >= 1
+
+        page.locator('[data-action="view-detail"][data-list="approved"]').first.click()
+        page.wait_for_url("**/reservations/*")
+        page.wait_for_selector("text=Reservation #")
         browser.close()

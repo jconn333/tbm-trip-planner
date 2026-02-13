@@ -21,7 +21,6 @@
     .brand{ display:flex; align-items:center; gap:12px; min-width:0; }
     .logo{ width:36px; height:36px; flex:0 0 auto; }
     .brandText h1{ margin:0; line-height:1.2; }
-    .brandText .sub{ margin-top:2px; line-height:1.4; overflow-wrap:anywhere; }
     .headerRight{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .siteNav{ display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
     .authBox{ display:flex; align-items:center; gap:8px; }
@@ -94,52 +93,124 @@
   <div class="page">
     {% set _path = request.path if request is defined else "" %}
     <header class="topbar">
-      <div class="brand">
-        <div class="logo" aria-hidden="true"></div>
+      <a href="/" class="brand brandLink" aria-label="Go to Planner">
+        <img class="logo" src="{{ url_for('static', filename='img/tbm_flight_portal_logo.png') }}" alt="" aria-hidden="true" />
         <div class="brandText">
-          <h1>{{ page_app_name }}</h1>
-          <div class="sub">{% block header_subtitle %}Planning estimates for partner trips.{% endblock %}</div>
+          <h1>TBM Flight Portal</h1>
         </div>
-      </div>
-      <div class="headerRight">
-        <nav class="siteNav" aria-label="Primary navigation">
-          <a href="/" class="{% if _path == '/' or _path.startswith('/estimate') %}active{% endif %}" aria-current="{% if _path == '/' or _path.startswith('/estimate') %}page{% endif %}">Planner</a>
+      </a>
+      <button
+        type="button"
+        id="mobileMenuToggle"
+        class="mobileMenuToggle"
+        aria-label="Toggle navigation menu"
+        aria-expanded="false"
+        aria-controls="siteMenuPanel"
+      >
+        <span class="mobileMenuIcon" aria-hidden="true"></span>
+        <span class="mobileMenuLabel">Menu</span>
+      </button>
+      <div class="headerRight" id="siteMenuPanel">
+        <div class="desktopMenuBar">
+          <nav class="siteNav" aria-label="Primary navigation">
+            <a href="/" class="{% if _path == '/' or _path.startswith('/estimate') %}active{% endif %}" aria-current="{% if _path == '/' or _path.startswith('/estimate') %}page{% endif %}">Planner</a>
+            <a href="/calendar" class="{% if _path.startswith('/calendar') %}active{% endif %}" aria-current="{% if _path.startswith('/calendar') %}page{% endif %}">Calendar</a>
+            {% if current_user %}
+              <a href="/my-flights" class="{% if _path.startswith('/my-flights') %}active{% endif %}" aria-current="{% if _path.startswith('/my-flights') %}page{% endif %}">My Flights</a>
+            {% endif %}
 
-          <details class="navDropdown {% if _path.startswith('/calendar') or _path.startswith('/my-flights') %}active{% endif %}">
-            <summary class="navDropdownSummary">Operations</summary>
-            <div class="navDropdownMenu" role="menu" aria-label="Operations">
-              <a href="/calendar" class="{% if _path.startswith('/calendar') %}active{% endif %}" aria-current="{% if _path.startswith('/calendar') %}page{% endif %}" role="menuitem">Calendar</a>
-              {% if current_user %}
-                <a href="/my-flights" class="{% if _path.startswith('/my-flights') %}active{% endif %}" aria-current="{% if _path.startswith('/my-flights') %}page{% endif %}" role="menuitem">My Flights</a>
-              {% endif %}
-            </div>
-          </details>
-
-          {% if current_user and current_user.role == 'admin' %}
-            <details class="navDropdown {% if _path.startswith('/admin') %}active{% endif %}">
-              <summary class="navDropdownSummary">Admin</summary>
-              <div class="navDropdownMenu" role="menu" aria-label="Admin">
-                <a href="/admin" class="{% if _path == '/admin' %}active{% endif %}" aria-current="{% if _path == '/admin' %}page{% endif %}" role="menuitem">Overview</a>
-                <a href="/admin/flights" class="{% if _path.startswith('/admin/flights') %}active{% endif %}" aria-current="{% if _path.startswith('/admin/flights') %}page{% endif %}" role="menuitem">Flights</a>
-                <a href="/admin/settings" class="{% if _path.startswith('/admin/settings') %}active{% endif %}" aria-current="{% if _path.startswith('/admin/settings') %}page{% endif %}" role="menuitem">Settings</a>
+            {% if current_user and current_user.role == 'admin' %}
+              <div class="navDropdown {% if _path.startswith('/admin') %}active{% endif %}">
+                <button
+                  type="button"
+                  class="navDropdownTrigger"
+                  aria-haspopup="true"
+                  aria-expanded="false"
+                  aria-controls="navAdminMenu"
+                >
+                  Admin
+                </button>
+                <div id="navAdminMenu" class="navDropdownMenu" role="menu" aria-label="Admin">
+                  <a href="/admin" class="{% if _path == '/admin' %}active{% endif %}" aria-current="{% if _path == '/admin' %}page{% endif %}" role="menuitem">Overview</a>
+                  <a href="/admin/flights" class="{% if _path.startswith('/admin/flights') %}active{% endif %}" aria-current="{% if _path.startswith('/admin/flights') %}page{% endif %}" role="menuitem">Flights</a>
+                  <a href="/admin/settings" class="{% if _path.startswith('/admin/settings') %}active{% endif %}" aria-current="{% if _path.startswith('/admin/settings') %}page{% endif %}" role="menuitem">Settings</a>
+                </div>
               </div>
-            </details>
-          {% endif %}
-        </nav>
-        <div class="authBox">
-          {% if current_user %}
-            <span class="authUser">{{ current_user.name }}</span>
-            <form method="post" action="/logout">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-              <button class="authBtn" type="submit">Log out</button>
-            </form>
-          {% else %}
-            <a href="/login" class="{% if _path.startswith('/login') %}active{% endif %}">Log in</a>
-          {% endif %}
+            {% endif %}
+            {% if current_user %}
+              <div class="navDropdown {% if _path.startswith('/account') %}active{% endif %}">
+                <button
+                  type="button"
+                  class="navDropdownTrigger"
+                  aria-haspopup="true"
+                  aria-expanded="false"
+                  aria-controls="navAccountMenu"
+                >
+                  Account
+                </button>
+                <div id="navAccountMenu" class="navDropdownMenu" role="menu" aria-label="Account">
+                  <a href="/account" class="{% if _path.startswith('/account') %}active{% endif %}" aria-current="{% if _path.startswith('/account') %}page{% endif %}" role="menuitem">Profile</a>
+                  <form method="post" action="/logout" class="navDropdownActionForm" role="none">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <button class="navDropdownAction" type="submit" role="menuitem">Sign out</button>
+                  </form>
+                </div>
+              </div>
+            {% else %}
+              <a href="/login" class="{% if _path.startswith('/login') %}active{% endif %}" aria-current="{% if _path.startswith('/login') %}page{% endif %}">Log in</a>
+            {% endif %}
+          </nav>
         </div>
-        {% block header_badge %}
-          <div class="badge" title="App status"><span class="dot" aria-hidden="true"></span>Ready</div>
-        {% endblock %}
+
+        <div class="mobileMenuSheet">
+          <nav class="mobileNavList" aria-label="Mobile navigation">
+            <a href="/" class="mobileNavLink {% if _path == '/' or _path.startswith('/estimate') %}active{% endif %}" aria-current="{% if _path == '/' or _path.startswith('/estimate') %}page{% endif %}">Planner</a>
+            <a href="/calendar" class="mobileNavLink {% if _path.startswith('/calendar') %}active{% endif %}" aria-current="{% if _path.startswith('/calendar') %}page{% endif %}">Calendar</a>
+            {% if current_user %}
+              <a href="/my-flights" class="mobileNavLink {% if _path.startswith('/my-flights') %}active{% endif %}" aria-current="{% if _path.startswith('/my-flights') %}page{% endif %}">My Flights</a>
+            {% endif %}
+            {% if current_user and current_user.role == 'admin' %}
+              <div class="mobileAdminSection" id="mobileAdminSection">
+                <button
+                  type="button"
+                  id="mobileAdminToggle"
+                  class="mobileAdminToggle {% if _path.startswith('/admin') %}active{% endif %}"
+                  aria-expanded="{% if _path.startswith('/admin') %}true{% else %}false{% endif %}"
+                  aria-controls="mobileAdminLinks"
+                >
+                  Admin
+                </button>
+                <div id="mobileAdminLinks" class="mobileAdminLinks {% if _path.startswith('/admin') %}is-open{% endif %}">
+                  <a href="/admin" class="mobileNavLink {% if _path == '/admin' %}active{% endif %}" aria-current="{% if _path == '/admin' %}page{% endif %}">Overview</a>
+                  <a href="/admin/flights" class="mobileNavLink {% if _path.startswith('/admin/flights') %}active{% endif %}" aria-current="{% if _path.startswith('/admin/flights') %}page{% endif %}">Flights</a>
+                  <a href="/admin/settings" class="mobileNavLink {% if _path.startswith('/admin/settings') %}active{% endif %}" aria-current="{% if _path.startswith('/admin/settings') %}page{% endif %}">Settings</a>
+                </div>
+              </div>
+            {% endif %}
+            {% if current_user %}
+              <div class="mobileAccountSection" id="mobileAccountSection">
+                <button
+                  type="button"
+                  id="mobileAccountToggle"
+                  class="mobileAdminToggle {% if _path.startswith('/account') %}active{% endif %}"
+                  aria-expanded="{% if _path.startswith('/account') %}true{% else %}false{% endif %}"
+                  aria-controls="mobileAccountLinks"
+                >
+                  Account
+                </button>
+                <div id="mobileAccountLinks" class="mobileAccountLinks {% if _path.startswith('/account') %}is-open{% endif %}">
+                  <a href="/account" class="mobileNavLink {% if _path.startswith('/account') %}active{% endif %}" aria-current="{% if _path.startswith('/account') %}page{% endif %}">Profile</a>
+                  <form method="post" action="/logout" class="mobileAccountLogoutForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <button class="mobileNavLink mobileNavAction" type="submit">Sign out</button>
+                  </form>
+                </div>
+              </div>
+            {% else %}
+              <a href="/login" class="mobileActionBtn {% if _path.startswith('/login') %}active{% endif %}" aria-current="{% if _path.startswith('/login') %}page{% endif %}">Log in</a>
+            {% endif %}
+          </nav>
+        </div>
       </div>
     </header>
 
@@ -207,11 +278,31 @@
         csrfToken,
       });
 
-      const navDropdowns = Array.from(document.querySelectorAll('.siteNav .navDropdown'));
+      const navDropdowns = Array.from(document.querySelectorAll('.desktopMenuBar .siteNav .navDropdown'));
       if(navDropdowns.length){
         const canHoverDropdowns = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
         const closeTimers = new WeakMap();
+
+        const setOpen = (dropdown, shouldOpen) => {
+          dropdown.classList.toggle('is-open', shouldOpen);
+          const trigger = dropdown.querySelector('.navDropdownTrigger');
+          if(trigger){
+            trigger.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+          }
+        };
+
+        const closeAll = (exceptDropdown = null) => {
+          navDropdowns.forEach((dropdown) => {
+            if(exceptDropdown && dropdown === exceptDropdown) return;
+            setOpen(dropdown, false);
+          });
+        };
+
         navDropdowns.forEach((dropdown) => {
+          const trigger = dropdown.querySelector('.navDropdownTrigger');
+          const menuItems = Array.from(dropdown.querySelectorAll('.navDropdownMenu a, .navDropdownMenu button'));
+          if(!trigger) return;
+
           const clearCloseTimer = () => {
             const timerId = closeTimers.get(dropdown);
             if(timerId){
@@ -219,30 +310,54 @@
               closeTimers.delete(dropdown);
             }
           };
+
           const scheduleClose = () => {
             clearCloseTimer();
             const timerId = window.setTimeout(() => {
-              dropdown.open = false;
+              setOpen(dropdown, false);
               closeTimers.delete(dropdown);
-            }, 140);
+            }, 170);
             closeTimers.set(dropdown, timerId);
           };
-          dropdown.addEventListener('toggle', () => {
-            if(!dropdown.open) return;
-            navDropdowns.forEach((other) => {
-              if(other !== dropdown) other.open = false;
+
+          trigger.addEventListener('click', () => {
+            const isOpen = dropdown.classList.contains('is-open');
+            closeAll(dropdown);
+            setOpen(dropdown, !isOpen);
+          });
+
+          trigger.addEventListener('keydown', (event) => {
+            if(event.key === 'ArrowDown'){
+              event.preventDefault();
+              closeAll(dropdown);
+              setOpen(dropdown, true);
+              if(menuItems[0]) menuItems[0].focus();
+            }
+          });
+
+          menuItems.forEach((item) => {
+            item.addEventListener('click', () => closeAll());
+            item.addEventListener('keydown', (event) => {
+              if(event.key === 'Escape'){
+                event.preventDefault();
+                closeAll();
+                trigger.focus();
+              }
             });
           });
+
           if(canHoverDropdowns){
             dropdown.addEventListener('mouseenter', () => {
               clearCloseTimer();
-              navDropdowns.forEach((other) => {
-                if(other !== dropdown) other.open = false;
-              });
-              dropdown.open = true;
+              closeAll(dropdown);
+              setOpen(dropdown, true);
             });
             dropdown.addEventListener('mouseleave', scheduleClose);
-            dropdown.addEventListener('focusin', clearCloseTimer);
+            dropdown.addEventListener('focusin', () => {
+              clearCloseTimer();
+              closeAll(dropdown);
+              setOpen(dropdown, true);
+            });
             dropdown.addEventListener('focusout', (event) => {
               const nextTarget = event.relatedTarget;
               if(nextTarget instanceof Node && dropdown.contains(nextTarget)) return;
@@ -250,15 +365,128 @@
             });
           }
         });
+
         document.addEventListener('click', (event) => {
           if(!(event.target instanceof Element)) return;
-          if(event.target.closest('.siteNav .navDropdown')) return;
-          navDropdowns.forEach((dropdown) => { dropdown.open = false; });
+          if(event.target.closest('.desktopMenuBar .siteNav .navDropdown')) return;
+          closeAll();
         });
+
         document.addEventListener('keydown', (event) => {
           if(event.key !== 'Escape') return;
-          navDropdowns.forEach((dropdown) => { dropdown.open = false; });
+          closeAll();
         });
+      }
+
+      const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+      const siteMenuPanel = document.getElementById('siteMenuPanel');
+      if(mobileMenuToggle && siteMenuPanel){
+        const mobileQuery = window.matchMedia('(max-width: 980px)');
+        const mobileAdminSection = document.getElementById('mobileAdminSection');
+        const mobileAdminToggle = document.getElementById('mobileAdminToggle');
+        const mobileAdminLinks = document.getElementById('mobileAdminLinks');
+        const mobileAccountSection = document.getElementById('mobileAccountSection');
+        const mobileAccountToggle = document.getElementById('mobileAccountToggle');
+        const mobileAccountLinks = document.getElementById('mobileAccountLinks');
+        const setMenuOpen = (isOpen) => {
+          siteMenuPanel.classList.toggle('is-open', !!isOpen);
+          mobileMenuToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        };
+        const setAdminOpen = (isOpen) => {
+          if(!mobileAdminSection || !mobileAdminToggle || !mobileAdminLinks) return;
+          mobileAdminSection.classList.toggle('is-open', !!isOpen);
+          mobileAdminLinks.classList.toggle('is-open', !!isOpen);
+          mobileAdminToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        };
+        const setAccountOpen = (isOpen) => {
+          if(!mobileAccountSection || !mobileAccountToggle || !mobileAccountLinks) return;
+          mobileAccountSection.classList.toggle('is-open', !!isOpen);
+          mobileAccountLinks.classList.toggle('is-open', !!isOpen);
+          mobileAccountToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        };
+
+        const syncMenuForViewport = () => {
+          if(!mobileQuery.matches){
+            setMenuOpen(false);
+            setAdminOpen(false);
+            setAccountOpen(false);
+          }
+        };
+
+        mobileMenuToggle.addEventListener('click', () => {
+          const isOpen = siteMenuPanel.classList.contains('is-open');
+          setMenuOpen(!isOpen);
+        });
+
+        siteMenuPanel.querySelectorAll('.mobileMenuSheet a, .mobileMenuSheet button[type="submit"]').forEach((action) => {
+          action.addEventListener('click', () => {
+            if(mobileQuery.matches){
+              setMenuOpen(false);
+              setAdminOpen(false);
+              setAccountOpen(false);
+            }
+          });
+        });
+
+        if(mobileAdminToggle){
+          mobileAdminToggle.addEventListener('click', () => {
+            const isOpen = mobileAdminSection && mobileAdminSection.classList.contains('is-open');
+            setAdminOpen(!isOpen);
+          });
+          mobileAdminToggle.addEventListener('keydown', (event) => {
+            if(event.key === 'Escape'){
+              setAdminOpen(false);
+              mobileAdminToggle.focus();
+            }
+          });
+        }
+        if(mobileAccountToggle){
+          mobileAccountToggle.addEventListener('click', () => {
+            const isOpen = mobileAccountSection && mobileAccountSection.classList.contains('is-open');
+            setAccountOpen(!isOpen);
+          });
+          mobileAccountToggle.addEventListener('keydown', (event) => {
+            if(event.key === 'Escape'){
+              setAccountOpen(false);
+              mobileAccountToggle.focus();
+            }
+          });
+        }
+
+        document.addEventListener('keydown', (event) => {
+          if(event.key === 'Escape' && mobileQuery.matches){
+            setMenuOpen(false);
+            setAdminOpen(false);
+            setAccountOpen(false);
+          }
+        });
+
+        document.addEventListener('click', (event) => {
+          if(!mobileQuery.matches) return;
+          if(!siteMenuPanel.classList.contains('is-open')) return;
+          if(!(event.target instanceof Element)) return;
+          if(event.target.closest('.topbar')) return;
+          setMenuOpen(false);
+          setAdminOpen(false);
+          setAccountOpen(false);
+        });
+
+        if(mobileAdminSection && mobileAdminSection.classList.contains('is-open')){
+          setAdminOpen(true);
+        } else {
+          setAdminOpen(false);
+        }
+        if(mobileAccountSection && mobileAccountSection.classList.contains('is-open')){
+          setAccountOpen(true);
+        } else {
+          setAccountOpen(false);
+        }
+
+        if(typeof mobileQuery.addEventListener === 'function'){
+          mobileQuery.addEventListener('change', syncMenuForViewport);
+        } else if(typeof mobileQuery.addListener === 'function'){
+          mobileQuery.addListener(syncMenuForViewport);
+        }
       }
     })();
   </script>
