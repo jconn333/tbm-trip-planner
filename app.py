@@ -115,6 +115,12 @@ GEOCODE_COUNTRY_CODES = os.getenv("GEOCODE_COUNTRY_CODES", "us").strip()
 AIRPORT_META_TIMEOUT_SEC = _env_int("AIRPORT_META_TIMEOUT_SEC", 8)
 AIRPORT_META_CACHE_TTL_SEC = _env_int("AIRPORT_META_CACHE_TTL_SEC", 21600)
 AIRPORT_META_CACHE_MAX_KEYS = _env_int("AIRPORT_META_CACHE_MAX_KEYS", 512)
+FLIGHTAWARE_AEROAPI_KEY = (os.getenv("FLIGHTAWARE_AEROAPI_KEY") or "").strip()
+FLIGHTAWARE_AEROAPI_BASE = (os.getenv("FLIGHTAWARE_AEROAPI_BASE") or "https://aeroapi.flightaware.com/aeroapi").rstrip("/")
+FLIGHTAWARE_API_TIMEOUT_SEC = _env_int("FLIGHTAWARE_API_TIMEOUT_SEC", 8)
+FLIGHTAWARE_CACHE_TTL_SEC = _env_int("FLIGHTAWARE_CACHE_TTL_SEC", 20)
+LIVE_TRACKING_TAIL = (os.getenv("LIVE_TRACKING_TAIL") or "N656W").strip().upper()
+LIVE_TRACKING_MATCH_WINDOW_HOURS = _env_int("LIVE_TRACKING_MATCH_WINDOW_HOURS", 6)
 TBM_DB_PATH = os.getenv("TBM_DB_PATH", os.path.join(BASE_DIR, "tbm.sqlite3"))
 TBM_HOME_TZ = os.getenv("TBM_HOME_TZ", "America/New_York")
 TBM_DEFAULT_PARKED_ICAO = (os.getenv("TBM_DEFAULT_PARKED_ICAO") or "").strip().upper()
@@ -157,6 +163,8 @@ _GEOCODE_SUGGEST_CACHE: dict[str, tuple[float, list[dict]]] = {}
 _GEOCODE_SUGGEST_CACHE_LOCK = Lock()
 _AIRPORT_META_CACHE: dict[str, tuple[float, dict]] = {}
 _AIRPORT_META_CACHE_LOCK = Lock()
+_LIVE_TRACKING_CACHE: dict[str, tuple[float, dict]] = {}
+_LIVE_TRACKING_CACHE_LOCK = Lock()
 _SETTINGS_CACHE: dict[str, str] = {}
 _SETTINGS_CACHE_AT = 0.0
 _SETTINGS_CACHE_LOCK = Lock()
@@ -989,6 +997,450 @@ def _json_error(message: str, status: int = 400, code: str = "bad_request", fiel
     if field:
         payload["field"] = field
     return jsonify(payload), status
+
+
+def _flightaware_live_url(tail_number: str) -> str:
+    return f"https://www.flightaware.com/live/flight/{urllib.parse.quote((tail_number or LIVE_TRACKING_TAIL).strip().upper())}"
+
+
+def _safe_iso_utc(value) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value), tz=ZoneInfo("UTC")).isoformat()
+        except Exception:
+            return None
+    if isinstance(value, dict):
+        for key in ("epoch", "timestamp", "unix", "seconds"):
+            if key in value:
+                return _safe_iso_utc(value.get(key))
+        for key in ("time", "date", "datetime", "scheduled", "actual", "estimated"):
+            if key in value:
+                return _safe_iso_utc(value.get(key))
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.isdigit():
+        try:
+            return datetime.fromtimestamp(float(text), tz=ZoneInfo("UTC")).isoformat()
+        except Exception:
+            return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt.astimezone(ZoneInfo("UTC")).isoformat()
+
+
+def _safe_float(value) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _safe_int(value) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(round(float(value)))
+    except Exception:
+        return None
+
+
+def _first_present(d: dict | None, keys: tuple[str, ...]):
+    if not isinstance(d, dict):
+        return None
+    for key in keys:
+        if key in d and d.get(key) not in (None, ""):
+            return d.get(key)
+    return None
+
+
+def _extract_airport_code(field: object) -> str | None:
+    if field in (None, ""):
+        return None
+    if isinstance(field, str):
+        code = field.strip().upper()
+        return code or None
+    if isinstance(field, dict):
+        raw = _first_present(field, ("code_icao", "icao_code", "icao", "code_iata", "iata", "code", "airport_code"))
+        if raw:
+            return str(raw).strip().upper() or None
+    return None
+
+
+def _coerce_track_points(track_payload: object, *, limit: int = 30) -> list[dict]:
+    if not isinstance(track_payload, dict):
+        return []
+    raw_points = track_payload.get("positions")
+    if not isinstance(raw_points, list):
+        raw_points = track_payload.get("track")
+    if not isinstance(raw_points, list):
+        raw_points = []
+
+    out: list[dict] = []
+    for row in raw_points:
+        if not isinstance(row, dict):
+            continue
+        lat = _safe_float(_first_present(row, ("latitude", "lat")))
+        lon = _safe_float(_first_present(row, ("longitude", "lon", "lng")))
+        if lat is None or lon is None:
+            continue
+        point = {
+            "time_utc": _safe_iso_utc(_first_present(row, ("timestamp", "time", "update_type", "date", "clock"))),
+            "lat": lat,
+            "lon": lon,
+            "altitude_ft": _safe_int(_first_present(row, ("altitude", "altitude_ft"))),
+            "groundspeed_kts": _safe_int(_first_present(row, ("groundspeed", "groundspeed_kts", "gs"))),
+        }
+        out.append(point)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _coerce_status(raw_status: str | None, *, altitude_ft: int | None, groundspeed_kts: int | None, actual_arrival_time_utc: str | None) -> str:
+    status = (raw_status or "").strip().lower()
+    if actual_arrival_time_utc:
+        return "arrived"
+    if "arriv" in status or "land" in status:
+        return "arrived"
+    if "en route" in status or "airborne" in status or "depart" in status:
+        return "en_route"
+    if "ground" in status or "taxi" in status or "scheduled" in status:
+        return "on_ground"
+    if (altitude_ft or 0) >= 1500:
+        return "en_route"
+    if (groundspeed_kts or 0) >= 90:
+        return "en_route"
+    if (groundspeed_kts or 0) > 0:
+        return "on_ground"
+    return "unknown"
+
+
+def _build_timeline_events(flight: dict) -> list[dict]:
+    events: list[dict] = []
+    for event_type, key, label in (
+        ("filed", "filed_departure_time_utc", "Filed departure"),
+        ("departed", "actual_departure_time_utc", "Departed"),
+        ("eta", "estimated_arrival_time_utc", "Estimated arrival"),
+        ("arrived", "actual_arrival_time_utc", "Arrived"),
+    ):
+        value = flight.get(key)
+        if value:
+            events.append({"type": event_type, "time_utc": value, "label": label})
+    events.sort(key=lambda item: item.get("time_utc") or "", reverse=True)
+    return events
+
+
+def _flightaware_get(path: str, params: dict | None = None) -> dict:
+    if not FLIGHTAWARE_AEROAPI_KEY:
+        raise RuntimeError("flightaware_api_key_missing")
+    query = f"?{urllib.parse.urlencode(params or {}, doseq=True)}" if params else ""
+    url = f"{FLIGHTAWARE_AEROAPI_BASE}/{path.lstrip('/')}{query}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "x-apikey": FLIGHTAWARE_AEROAPI_KEY,
+            "Accept": "application/json",
+            "User-Agent": "tbm-trip-planner/1.0",
+        },
+    )
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    with urllib.request.urlopen(req, timeout=FLIGHTAWARE_API_TIMEOUT_SEC, context=ctx) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _flightaware_primary_flight(flights_payload: object) -> dict | None:
+    if not isinstance(flights_payload, dict):
+        return None
+    flights = flights_payload.get("flights")
+    if not isinstance(flights, list) or not flights:
+        return None
+    first = flights[0]
+    return first if isinstance(first, dict) else None
+
+
+def _flightaware_snapshot_from_payload(tail_number: str, flights_payload: dict, track_payload: dict | None, prior_snapshot: dict | None) -> dict:
+    primary = _flightaware_primary_flight(flights_payload) or {}
+    origin = _extract_airport_code(primary.get("origin"))
+    destination = _extract_airport_code(primary.get("destination"))
+    ident = str(_first_present(primary, ("ident", "ident_icao", "ident_iata")) or tail_number).strip().upper()
+
+    latitude = _safe_float(_first_present(primary, ("latitude", "lat")))
+    longitude = _safe_float(_first_present(primary, ("longitude", "lon", "lng")))
+    groundspeed_kts = _safe_int(_first_present(primary, ("groundspeed", "groundspeed_kts", "gs")))
+    altitude_ft = _safe_int(_first_present(primary, ("altitude", "altitude_ft")))
+    heading_deg = _safe_int(_first_present(primary, ("heading", "heading_deg", "track")))
+    last_position_time_utc = _safe_iso_utc(_first_present(primary, ("last_position", "last_position_time", "position_time")))
+
+    filed_departure_time_utc = _safe_iso_utc(primary.get("filed_departure_time"))
+    estimated_arrival_time_utc = _safe_iso_utc(primary.get("estimated_arrival_time"))
+    actual_departure_time_utc = _safe_iso_utc(primary.get("actual_departure_time"))
+    actual_arrival_time_utc = _safe_iso_utc(primary.get("actual_arrival_time"))
+
+    track_points = _coerce_track_points(track_payload or {})
+    if not track_points and latitude is not None and longitude is not None:
+        track_points = [
+            {
+                "time_utc": last_position_time_utc,
+                "lat": latitude,
+                "lon": longitude,
+                "altitude_ft": altitude_ft,
+                "groundspeed_kts": groundspeed_kts,
+            }
+        ]
+
+    prior_eta = (prior_snapshot or {}).get("estimated_arrival_time_utc")
+    eta_delta_minutes = None
+    eta_confidence = "unknown"
+    if prior_eta and estimated_arrival_time_utc:
+        try:
+            eta_delta_minutes = int(
+                round(
+                    (
+                        datetime.fromisoformat(estimated_arrival_time_utc)
+                        - datetime.fromisoformat(prior_eta)
+                    ).total_seconds()
+                    / 60.0
+                )
+            )
+            eta_confidence = "stable" if abs(eta_delta_minutes) <= 5 else "shifting"
+        except Exception:
+            eta_delta_minutes = None
+            eta_confidence = "unknown"
+
+    snapshot = {
+        "tail_number": tail_number,
+        "status": _coerce_status(
+            str(primary.get("status") or ""),
+            altitude_ft=altitude_ft,
+            groundspeed_kts=groundspeed_kts,
+            actual_arrival_time_utc=actual_arrival_time_utc,
+        ),
+        "ident": ident or tail_number,
+        "origin": origin,
+        "destination": destination,
+        "filed_departure_time_utc": filed_departure_time_utc,
+        "estimated_arrival_time_utc": estimated_arrival_time_utc,
+        "actual_departure_time_utc": actual_departure_time_utc,
+        "actual_arrival_time_utc": actual_arrival_time_utc,
+        "latitude": latitude,
+        "longitude": longitude,
+        "groundspeed_kts": groundspeed_kts,
+        "altitude_ft": altitude_ft,
+        "heading_deg": heading_deg,
+        "last_position_time_utc": last_position_time_utc,
+        "events": [],
+        "track_points": track_points,
+        "eta_confidence": eta_confidence,
+        "eta_delta_minutes": eta_delta_minutes,
+    }
+    snapshot["events"] = _build_timeline_events(snapshot)
+    return snapshot
+
+
+def _best_live_reservation_match(snapshot: dict) -> tuple[str, dict | None]:
+    origin = (snapshot.get("origin") or "").strip().upper()
+    destination = (snapshot.get("destination") or "").strip().upper()
+    if not origin or not destination:
+        return "none", None
+
+    window_start = _to_utc_iso(_utc_now() - timedelta(hours=24))
+    window_end = _to_utc_iso(_utc_now() + timedelta(hours=48))
+    match_time_utc = (
+        snapshot.get("actual_departure_time_utc")
+        or snapshot.get("last_position_time_utc")
+        or snapshot.get("filed_departure_time_utc")
+        or _to_utc_iso(_utc_now())
+    )
+    try:
+        match_time = datetime.fromisoformat(match_time_utc)
+    except Exception:
+        match_time = _utc_now()
+    match_window = timedelta(hours=max(1, LIVE_TRACKING_MATCH_WINDOW_HOURS))
+
+    with _db_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT r.*, tu.name AS traveling_owner_name, ru.name AS requested_by_name, au.name AS approved_by_name
+            FROM reservations r
+            JOIN users tu ON tu.id = r.traveling_user_id
+            JOIN users ru ON ru.id = r.requested_by_user_id
+            LEFT JOIN users au ON au.id = r.approved_by_user_id
+            WHERE r.status = 'approved'
+              AND r.start_utc <= ?
+              AND r.end_utc >= ?
+            ORDER BY r.start_utc ASC
+            """,
+            (window_end, window_start),
+        ).fetchall()
+
+    matches: list[tuple[float, dict]] = []
+    for row in rows:
+        if str(row["dep_icao"]).upper() != origin or str(row["dest_icao"]).upper() != destination:
+            continue
+        start = datetime.fromisoformat(row["start_utc"])
+        end = datetime.fromisoformat(row["end_utc"])
+        if match_time < (start - match_window) or match_time > (end + match_window):
+            continue
+        score = abs((match_time - start).total_seconds())
+        matches.append((score, row))
+
+    if matches:
+        matches.sort(key=lambda item: item[0])
+        row = matches[0][1]
+        return "matched", {
+            "reservation_id": int(row["id"]),
+            "traveling_owner": row["traveling_owner_name"],
+            "requested_by": row["requested_by_name"],
+            "status": row["status"],
+            "dep_icao": row["dep_icao"],
+            "dest_icao": row["dest_icao"],
+            "start_display": _utc_iso_to_local_display(row["start_utc"]),
+            "end_display": _utc_iso_to_local_display(row["end_utc"]),
+            "start_utc": row["start_utc"],
+            "end_utc": row["end_utc"],
+        }
+
+    movement_statuses = {"en_route", "arrived"}
+    if snapshot.get("status") in movement_statuses or snapshot.get("actual_departure_time_utc"):
+        return "mismatch", None
+    return "none", None
+
+
+def _live_tracking_payload_for_tail(tail_number: str) -> dict:
+    tail = (tail_number or LIVE_TRACKING_TAIL).strip().upper() or LIVE_TRACKING_TAIL
+    now = time.time()
+    warnings: list[str] = []
+    prior_snapshot = None
+    with _LIVE_TRACKING_CACHE_LOCK:
+        cached = _LIVE_TRACKING_CACHE.get(tail)
+        if cached:
+            prior_snapshot = cached[1].get("snapshot")
+            if (now - cached[0]) <= FLIGHTAWARE_CACHE_TTL_SEC:
+                return dict(cached[1])
+
+    flightaware_url = _flightaware_live_url(tail)
+    if not FLIGHTAWARE_AEROAPI_KEY:
+        payload = {
+            "provider_mode": "fallback",
+            "as_of": _to_utc_iso(_utc_now()),
+            "flightaware_url": flightaware_url,
+            "snapshot": {
+                "tail_number": tail,
+                "status": "unknown",
+                "ident": tail,
+                "origin": None,
+                "destination": None,
+                "filed_departure_time_utc": None,
+                "estimated_arrival_time_utc": None,
+                "actual_departure_time_utc": None,
+                "actual_arrival_time_utc": None,
+                "latitude": None,
+                "longitude": None,
+                "groundspeed_kts": None,
+                "altitude_ft": None,
+                "heading_deg": None,
+                "last_position_time_utc": None,
+                "events": [],
+                "track_points": [],
+                "eta_confidence": "unknown",
+                "eta_delta_minutes": None,
+            },
+            "reservation_match": "none",
+            "reservation_context": None,
+            "warnings": ["AeroAPI key is not configured."],
+        }
+        with _LIVE_TRACKING_CACHE_LOCK:
+            _LIVE_TRACKING_CACHE[tail] = (now, dict(payload))
+        return payload
+
+    start_time = time.time()
+    provider_mode = "aeroapi"
+    snapshot = None
+    try:
+        flights_payload = _flightaware_get(f"flights/{urllib.parse.quote(tail)}", {"max_pages": 1})
+        primary = _flightaware_primary_flight(flights_payload)
+        track_payload = None
+        if primary:
+            fa_flight_id = _first_present(primary, ("fa_flight_id", "flight_id"))
+            if fa_flight_id:
+                try:
+                    track_payload = _flightaware_get(f"flights/{urllib.parse.quote(str(fa_flight_id))}/track", {"max_pages": 1})
+                except Exception:
+                    logger.exception("flightaware_track_fetch_failed tail=%s", tail)
+                    warnings.append("Track data unavailable.")
+        snapshot = _flightaware_snapshot_from_payload(tail, flights_payload, track_payload, prior_snapshot)
+        if not primary:
+            warnings.append("No active or recent flight data was returned by AeroAPI.")
+    except Exception:
+        provider_mode = "fallback"
+        logger.exception("flightaware_live_fetch_failed tail=%s", tail)
+        warnings.append("AeroAPI request failed; showing fallback state.")
+
+    if snapshot is None:
+        snapshot = {
+            "tail_number": tail,
+            "status": "unknown",
+            "ident": tail,
+            "origin": None,
+            "destination": None,
+            "filed_departure_time_utc": None,
+            "estimated_arrival_time_utc": None,
+            "actual_departure_time_utc": None,
+            "actual_arrival_time_utc": None,
+            "latitude": None,
+            "longitude": None,
+            "groundspeed_kts": None,
+            "altitude_ft": None,
+            "heading_deg": None,
+            "last_position_time_utc": None,
+            "events": [],
+            "track_points": [],
+            "eta_confidence": "unknown",
+            "eta_delta_minutes": None,
+        }
+
+    reservation_match, reservation_context = _best_live_reservation_match(snapshot)
+    elapsed_ms = (time.time() - start_time) * 1000.0
+    logger.info(
+        "live_tracking_fetch_complete tail=%s provider=%s elapsed_ms=%.1f status=%s",
+        tail,
+        provider_mode,
+        elapsed_ms,
+        snapshot.get("status"),
+    )
+    payload = {
+        "provider_mode": provider_mode,
+        "as_of": _to_utc_iso(_utc_now()),
+        "flightaware_url": flightaware_url,
+        "snapshot": snapshot,
+        "reservation_match": reservation_match,
+        "reservation_context": reservation_context,
+        "warnings": warnings,
+    }
+    with _LIVE_TRACKING_CACHE_LOCK:
+        # Keep cache bounded by evicting stale entries first.
+        expired = [
+            key
+            for key, value in _LIVE_TRACKING_CACHE.items()
+            if (now - value[0]) > (FLIGHTAWARE_CACHE_TTL_SEC * 4)
+        ]
+        for key in expired:
+            _LIVE_TRACKING_CACHE.pop(key, None)
+        _LIVE_TRACKING_CACHE[tail] = (time.time(), dict(payload))
+    return payload
 
 
 
@@ -2136,6 +2588,17 @@ def my_flights_page():
     return render_template("my_flights.html", app_name=APP_NAME, home_timezone=_effective_home_timezone_name())
 
 
+@app.get("/live-tracking")
+@login_required
+def live_tracking_page():
+    return render_template(
+        "live_tracking.html",
+        app_name=APP_NAME,
+        home_timezone=_effective_home_timezone_name(),
+        live_tracking_tail=LIVE_TRACKING_TAIL,
+    )
+
+
 @app.get("/account")
 @login_required
 def account_page():
@@ -2520,6 +2983,17 @@ def api_admin_flights():
         )
     rows = [_reservation_payload(row) for row in result["rows"]]
     return jsonify({"items": rows, "total": int(result["total"]), "page": page, "page_size": page_size})
+
+
+@app.get("/api/live-tracking")
+@login_required
+def api_live_tracking():
+    requested_tail = (request.args.get("tail") or "").strip().upper()
+    tail = LIVE_TRACKING_TAIL
+    if requested_tail and getattr(g, "current_user", {}).get("role") == "admin":
+        tail = requested_tail
+    payload = _live_tracking_payload_for_tail(tail)
+    return jsonify(payload)
 
 
 
@@ -3057,6 +3531,7 @@ def health():
             "app": APP_NAME,
             "timestamp_utc": datetime.now(ZoneInfo("UTC")).isoformat(),
             "winds_cache_keys": len(_WINDTEMP_CACHE),
+            "live_tracking_cache_keys": len(_LIVE_TRACKING_CACHE),
         }
     )
 
@@ -3085,6 +3560,7 @@ def api_admin_system_metrics():
                 "settings_cache_keys": len(_SETTINGS_CACHE),
                 "winds_cache_keys": len(_WINDTEMP_CACHE),
                 "geocode_cache_keys": len(_GEOCODE_CACHE),
+                "live_tracking_cache_keys": len(_LIVE_TRACKING_CACHE),
             },
             "uptime_sec": int(time.time() - START_TIME_EPOCH),
         }
