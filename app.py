@@ -1255,7 +1255,7 @@ def _flightaware_snapshot_from_payload(tail_number: str, flights_payload: dict, 
     return snapshot
 
 
-def _best_live_reservation_match(snapshot: dict) -> tuple[str, dict | None]:
+def _live_reservation_match(snapshot: dict) -> tuple[str, dict | None]:
     origin = (snapshot.get("origin") or "").strip().upper()
     destination = (snapshot.get("destination") or "").strip().upper()
     if not origin or not destination:
@@ -1318,10 +1318,107 @@ def _best_live_reservation_match(snapshot: dict) -> tuple[str, dict | None]:
             "end_utc": row["end_utc"],
         }
 
-    movement_statuses = {"en_route", "arrived"}
-    if snapshot.get("status") in movement_statuses or snapshot.get("actual_departure_time_utc"):
-        return "mismatch", None
     return "none", None
+
+
+def _next_approved_reservation_for_aircraft() -> dict | None:
+    now_utc = _to_utc_iso(_utc_now())
+    with _db_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT r.*, tu.name AS traveling_owner_name, ru.name AS requested_by_name, au.name AS approved_by_name
+            FROM reservations r
+            JOIN users tu ON tu.id = r.traveling_user_id
+            JOIN users ru ON ru.id = r.requested_by_user_id
+            LEFT JOIN users au ON au.id = r.approved_by_user_id
+            WHERE r.status = 'approved'
+              AND r.start_utc >= ?
+            ORDER BY r.start_utc ASC
+            LIMIT 1
+            """,
+            (now_utc,),
+        ).fetchone()
+    if not row:
+        return None
+    start_dt = datetime.fromisoformat(row["start_utc"])
+    countdown_minutes = max(0, int((start_dt - _utc_now()).total_seconds() // 60))
+    return {
+        "reservation_id": int(row["id"]),
+        "dep_icao": row["dep_icao"],
+        "dest_icao": row["dest_icao"],
+        "start_utc": row["start_utc"],
+        "start_display": _utc_iso_to_local_display(row["start_utc"]),
+        "countdown_minutes": countdown_minutes,
+        "traveling_owner": row["traveling_owner_name"],
+    }
+
+
+def _derive_ground_insights(snapshot: dict, reservation_context: dict | None) -> dict:
+    last_movement = snapshot.get("last_position_time_utc") or snapshot.get("actual_arrival_time_utc") or snapshot.get("actual_departure_time_utc")
+    if not last_movement:
+        points = snapshot.get("track_points")
+        if isinstance(points, list) and points:
+            first = points[0] if isinstance(points[0], dict) else {}
+            last_movement = first.get("time_utc")
+
+    idle_duration_minutes = None
+    is_recently_active = False
+    if last_movement:
+        try:
+            idle_duration_minutes = max(0, int((_utc_now() - datetime.fromisoformat(last_movement)).total_seconds() // 60))
+            is_recently_active = idle_duration_minutes <= 180
+        except Exception:
+            idle_duration_minutes = None
+            is_recently_active = False
+
+    status = (snapshot.get("status") or "").strip().lower()
+    current_airport = None
+    if status in ("on_ground", "arrived"):
+        current_airport = (snapshot.get("destination") or "").strip().upper() or None
+    if not current_airport and reservation_context:
+        current_airport = (reservation_context.get("dest_icao") or "").strip().upper() or None
+
+    confidence_points = int(bool(current_airport)) + int(bool(last_movement))
+    if confidence_points >= 2:
+        ground_confidence = "high"
+    elif confidence_points == 1:
+        ground_confidence = "medium"
+    else:
+        ground_confidence = "low"
+
+    return {
+        "current_airport": current_airport,
+        "last_movement_time_utc": last_movement,
+        "idle_duration_minutes": idle_duration_minutes,
+        "ground_confidence": ground_confidence,
+        "is_recently_active": is_recently_active,
+    }
+
+
+def _build_ops_recommendations(
+    *,
+    snapshot: dict,
+    ground_insights: dict,
+    next_reservation: dict | None,
+    reservation_match: str,
+) -> list[str]:
+    recs: list[str] = []
+    if next_reservation is None:
+        recs.append("No upcoming approved flights are scheduled.")
+    else:
+        countdown = int(next_reservation.get("countdown_minutes") or 0)
+        if countdown <= 360:
+            recs.append("Preflight window is open for the next approved flight.")
+    if reservation_match == "none":
+        recs.append("No approved match found for current route/time.")
+
+    idle_minutes = ground_insights.get("idle_duration_minutes")
+    if isinstance(idle_minutes, int) and idle_minutes >= 720:
+        recs.append("Telemetry appears stale (12h+ since last movement); verify on FlightAware.")
+
+    if not recs:
+        recs.append("No immediate action needed.")
+    return recs
 
 
 def _live_tracking_payload_for_tail(tail_number: str) -> dict:
@@ -1338,33 +1435,46 @@ def _live_tracking_payload_for_tail(tail_number: str) -> dict:
 
     flightaware_url = _flightaware_live_url(tail)
     if not FLIGHTAWARE_AEROAPI_KEY:
+        snapshot = {
+            "tail_number": tail,
+            "status": "unknown",
+            "ident": tail,
+            "origin": None,
+            "destination": None,
+            "filed_departure_time_utc": None,
+            "estimated_arrival_time_utc": None,
+            "actual_departure_time_utc": None,
+            "actual_arrival_time_utc": None,
+            "latitude": None,
+            "longitude": None,
+            "groundspeed_kts": None,
+            "altitude_ft": None,
+            "heading_deg": None,
+            "last_position_time_utc": None,
+            "events": [],
+            "track_points": [],
+            "eta_confidence": "unknown",
+            "eta_delta_minutes": None,
+        }
+        reservation_match, reservation_context = _live_reservation_match(snapshot)
+        next_reservation = _next_approved_reservation_for_aircraft()
+        snapshot["ground_insights"] = _derive_ground_insights(snapshot, reservation_context)
+        ops_recommendations = _build_ops_recommendations(
+            snapshot=snapshot,
+            ground_insights=snapshot["ground_insights"],
+            next_reservation=next_reservation,
+            reservation_match=reservation_match,
+        )
         payload = {
             "provider_mode": "fallback",
             "as_of": _to_utc_iso(_utc_now()),
             "flightaware_url": flightaware_url,
-            "snapshot": {
-                "tail_number": tail,
-                "status": "unknown",
-                "ident": tail,
-                "origin": None,
-                "destination": None,
-                "filed_departure_time_utc": None,
-                "estimated_arrival_time_utc": None,
-                "actual_departure_time_utc": None,
-                "actual_arrival_time_utc": None,
-                "latitude": None,
-                "longitude": None,
-                "groundspeed_kts": None,
-                "altitude_ft": None,
-                "heading_deg": None,
-                "last_position_time_utc": None,
-                "events": [],
-                "track_points": [],
-                "eta_confidence": "unknown",
-                "eta_delta_minutes": None,
-            },
-            "reservation_match": "none",
-            "reservation_context": None,
+            "snapshot": snapshot,
+            "reservation_match": reservation_match,
+            "reservation_context": reservation_context,
+            "ui_mode": "unknown",
+            "next_reservation": next_reservation,
+            "ops_recommendations": ops_recommendations,
             "warnings": ["AeroAPI key is not configured."],
             "polling": {
                 "active_ms": max(10000, LIVE_TRACKING_ACTIVE_POLL_MS),
@@ -1430,7 +1540,22 @@ def _live_tracking_payload_for_tail(tail_number: str) -> dict:
             "eta_delta_minutes": None,
         }
 
-    reservation_match, reservation_context = _best_live_reservation_match(snapshot)
+    reservation_match, reservation_context = _live_reservation_match(snapshot)
+    next_reservation = _next_approved_reservation_for_aircraft()
+    snapshot["ground_insights"] = _derive_ground_insights(snapshot, reservation_context)
+    ops_recommendations = _build_ops_recommendations(
+        snapshot=snapshot,
+        ground_insights=snapshot["ground_insights"],
+        next_reservation=next_reservation,
+        reservation_match=reservation_match,
+    )
+    status = (snapshot.get("status") or "").strip().lower()
+    if status == "en_route":
+        ui_mode = "airborne"
+    elif status in ("on_ground", "arrived"):
+        ui_mode = "ground"
+    else:
+        ui_mode = "unknown"
     elapsed_ms = (time.time() - start_time) * 1000.0
     logger.info(
         "live_tracking_fetch_complete tail=%s provider=%s elapsed_ms=%.1f status=%s",
@@ -1446,6 +1571,9 @@ def _live_tracking_payload_for_tail(tail_number: str) -> dict:
         "snapshot": snapshot,
         "reservation_match": reservation_match,
         "reservation_context": reservation_context,
+        "ui_mode": ui_mode,
+        "next_reservation": next_reservation,
+        "ops_recommendations": ops_recommendations,
         "warnings": warnings,
         "polling": {
             "active_ms": max(10000, LIVE_TRACKING_ACTIVE_POLL_MS),

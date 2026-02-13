@@ -136,9 +136,28 @@
   color:#782532;
   font-size:13px;
 }
+.groundOpsPanel{
+  margin-top:12px;
+  border:1px solid color-mix(in srgb, var(--color-border) 90%, white);
+  border-radius:12px;
+  background:color-mix(in srgb, var(--color-surface-soft) 76%, white);
+  padding:12px;
+}
+.groundOpsGrid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+}
+.groundOpsList{
+  margin:10px 0 0;
+  padding-left:18px;
+  display:grid;
+  gap:6px;
+}
 @media (max-width:980px){
   .liveGrid{ grid-template-columns:1fr; }
   .liveMetaGrid{ grid-template-columns:1fr; }
+  .groundOpsGrid{ grid-template-columns:1fr; }
 }
 {% endblock %}
 {% block content %}
@@ -170,12 +189,45 @@
         <p class="metaValue" id="speedAltValue">-</p>
       </div>
       <div class="metaBlock">
-        <p class="metaLabel">ETA Confidence</p>
+        <p id="etaLabel" class="metaLabel">ETA Confidence</p>
         <p class="metaValue" id="etaValue">Unknown</p>
       </div>
     </div>
 
-    <h3>Timeline</h3>
+    <section id="groundOpsPanel" class="groundOpsPanel" hidden>
+      <h3>Ground Ops Snapshot</h3>
+      <div class="groundOpsGrid">
+        <div class="metaBlock">
+          <p class="metaLabel">Current Airport</p>
+          <p class="metaValue" id="groundAirportValue">-</p>
+        </div>
+        <div class="metaBlock">
+          <p class="metaLabel">Ground Confidence</p>
+          <p class="metaValue" id="groundConfidenceValue">-</p>
+        </div>
+        <div class="metaBlock">
+          <p class="metaLabel">Idle Since</p>
+          <p class="metaValue" id="idleSinceValue">-</p>
+        </div>
+        <div class="metaBlock">
+          <p class="metaLabel">Idle Duration</p>
+          <p class="metaValue" id="idleDurationValue">-</p>
+        </div>
+        <div class="metaBlock">
+          <p class="metaLabel">Next Approved Flight</p>
+          <p class="metaValue" id="nextReservationValue">-</p>
+        </div>
+        <div class="metaBlock">
+          <p class="metaLabel">Countdown</p>
+          <p class="metaValue" id="nextReservationCountdown">-</p>
+        </div>
+      </div>
+      <ul id="opsRecommendationsList" class="groundOpsList">
+        <li class="quiet">Waiting for recommendations…</li>
+      </ul>
+    </section>
+
+    <h3>Recent Activity</h3>
     <ul id="timelineList" class="timelineList">
       <li class="quiet">Waiting for data…</li>
     </ul>
@@ -216,7 +268,16 @@
     routeValue: document.getElementById('routeValue'),
     positionValue: document.getElementById('positionValue'),
     speedAltValue: document.getElementById('speedAltValue'),
+    etaLabel: document.getElementById('etaLabel'),
     etaValue: document.getElementById('etaValue'),
+    groundOpsPanel: document.getElementById('groundOpsPanel'),
+    groundAirportValue: document.getElementById('groundAirportValue'),
+    groundConfidenceValue: document.getElementById('groundConfidenceValue'),
+    idleSinceValue: document.getElementById('idleSinceValue'),
+    idleDurationValue: document.getElementById('idleDurationValue'),
+    nextReservationValue: document.getElementById('nextReservationValue'),
+    nextReservationCountdown: document.getElementById('nextReservationCountdown'),
+    opsRecommendationsList: document.getElementById('opsRecommendationsList'),
     timelineList: document.getElementById('timelineList'),
     trackList: document.getElementById('trackList'),
     matchStatusValue: document.getElementById('matchStatusValue'),
@@ -247,6 +308,14 @@
   function setError(message){
     el.errorBox.hidden = !message;
     el.errorBox.textContent = message || '';
+  }
+
+  function fmtMinutes(value){
+    if(!Number.isFinite(value)) return '-';
+    if(value < 60) return `${value} min`;
+    const hours = Math.floor(value / 60);
+    const mins = value % 60;
+    return mins ? `${hours}h ${mins}m` : `${hours}h`;
   }
 
   function renderTimeline(items){
@@ -290,13 +359,43 @@
       el.matchContextValue.textContent = `#${ctx.reservation_id} · ${ctx.dep_icao} → ${ctx.dest_icao} · ${ctx.start_display} to ${ctx.end_display} · Owner: ${ctx.traveling_owner}`;
       return;
     }
-    if(mode === 'mismatch'){
-      el.matchStatusValue.textContent = 'Possible mismatch';
-      el.matchContextValue.textContent = 'Live movement detected without a clear approved reservation match.';
-      return;
-    }
     el.matchStatusValue.textContent = 'No match';
     el.matchContextValue.textContent = 'No approved reservation match found for current route/time.';
+  }
+
+  function renderGroundOps(data, snapshot){
+    const uiMode = data.ui_mode || 'unknown';
+    const insights = snapshot.ground_insights || {};
+    const nextRes = data.next_reservation || null;
+    const recs = Array.isArray(data.ops_recommendations) ? data.ops_recommendations : [];
+    const onGroundMode = uiMode === 'ground';
+    el.groundOpsPanel.hidden = !onGroundMode;
+
+    if(!onGroundMode){
+      el.etaLabel.textContent = 'ETA Confidence';
+      return;
+    }
+
+    el.etaLabel.textContent = 'Ground State';
+    el.etaValue.textContent = insights.is_recently_active ? 'Recently Active' : 'Idle';
+    el.groundAirportValue.textContent = insights.current_airport || 'Unknown';
+    el.groundConfidenceValue.textContent = (insights.ground_confidence || 'unknown').toUpperCase();
+    el.idleSinceValue.textContent = fmtTime(insights.last_movement_time_utc);
+    el.idleDurationValue.textContent = fmtMinutes(Number(insights.idle_duration_minutes));
+
+    if(nextRes){
+      el.nextReservationValue.textContent = `#${nextRes.reservation_id} · ${nextRes.dep_icao} → ${nextRes.dest_icao} · ${nextRes.start_display}`;
+      el.nextReservationCountdown.textContent = fmtMinutes(Number(nextRes.countdown_minutes));
+    } else {
+      el.nextReservationValue.textContent = 'No upcoming approved flights';
+      el.nextReservationCountdown.textContent = '-';
+    }
+
+    if(!recs.length){
+      el.opsRecommendationsList.innerHTML = '<li class="quiet">No recommendations.</li>';
+    } else {
+      el.opsRecommendationsList.innerHTML = recs.map((item) => `<li>${item}</li>`).join('');
+    }
   }
 
   function render(data){
@@ -334,6 +433,7 @@
     el.etaValue.textContent = `${etaConfidence.charAt(0).toUpperCase()}${etaConfidence.slice(1)}${etaSuffix}`;
 
     el.openFlightAwareBtn.href = data.flightaware_url || el.openFlightAwareBtn.href;
+    renderGroundOps(data, snapshot);
     renderTimeline(snapshot.events);
     renderTrack(snapshot.track_points);
     renderMatch(data.reservation_match, data.reservation_context);

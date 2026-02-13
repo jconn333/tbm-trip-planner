@@ -106,6 +106,28 @@ def _sample_track_payload():
     }
 
 
+def _sample_ground_flight_payload(*, last_position_minutes_ago: int = 20):
+    now = datetime.now(ZoneInfo("UTC"))
+    return {
+        "flights": [
+            {
+                "ident": "N656W",
+                "fa_flight_id": "N656W-123",
+                "status": "On Ground",
+                "origin": {"code_icao": "KCAK"},
+                "destination": {"code_icao": "KSRQ"},
+                "latitude": 27.40,
+                "longitude": -82.55,
+                "groundspeed": 0,
+                "altitude": 0,
+                "heading": 0,
+                "actual_arrival_time": {"epoch": int((now - timedelta(minutes=35)).timestamp())},
+                "last_position": {"epoch": int((now - timedelta(minutes=last_position_minutes_ago)).timestamp())},
+            }
+        ]
+    }
+
+
 def test_live_tracking_page_requires_login(live_env):
     client = tbm_app.app.test_client()
     resp = client.get("/live-tracking")
@@ -169,6 +191,7 @@ def test_live_tracking_api_uses_aeroapi_and_cache(live_env, monkeypatch):
     data = first.get_json()
     assert data["provider_mode"] == "aeroapi"
     assert data["snapshot"]["status"] == "en_route"
+    assert data["reservation_match"] in ("matched", "none")
     assert len(data["snapshot"]["track_points"]) >= 1
     # First call should fetch flights + track once. Second call should hit cache.
     assert calls["count"] == 2
@@ -190,6 +213,11 @@ def test_live_tracking_api_provider_failure_falls_back(live_env, monkeypatch):
     data = resp.get_json()
     assert data["provider_mode"] == "fallback"
     assert data["snapshot"]["status"] == "unknown"
+    assert data["reservation_match"] == "none"
+    assert data["ui_mode"] == "unknown"
+    assert "ground_insights" in data["snapshot"]
+    assert "ops_recommendations" in data
+    assert "next_reservation" in data
     assert data["warnings"]
     assert "polling" in data
 
@@ -257,6 +285,78 @@ def test_live_tracking_api_matches_approved_reservation(live_env, monkeypatch):
     assert data["reservation_match"] == "matched"
     assert data["reservation_context"]["dep_icao"] == "KCAK"
     assert data["reservation_context"]["dest_icao"] == "KSRQ"
+
+
+def test_live_tracking_ground_mode_payload_shape(live_env, monkeypatch):
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_AEROAPI_KEY", "test-key")
+    tbm_app._LIVE_TRACKING_CACHE.clear()
+
+    def fake_get(path, params=None):  # noqa: ARG001
+        if path.startswith("flights/N656W-123/track"):
+            return _sample_track_payload()
+        return _sample_ground_flight_payload()
+
+    monkeypatch.setattr(tbm_app, "_flightaware_get", fake_get)
+    client = tbm_app.app.test_client()
+    assert _login(client, "owner@example.com", "ownerpass123").status_code == 200
+    resp = client.get("/api/live-tracking")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ui_mode"] == "ground"
+    assert data["reservation_match"] == "none"
+    assert "ground_insights" in data["snapshot"]
+    assert "current_airport" in data["snapshot"]["ground_insights"]
+    assert isinstance(data["ops_recommendations"], list)
+
+
+def test_live_tracking_includes_next_reservation_countdown(live_env, monkeypatch):
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_AEROAPI_KEY", "")
+    tbm_app._LIVE_TRACKING_CACHE.clear()
+
+    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+        owner = storage.get_user_by_email(conn, "owner@example.com")
+        start = datetime.now(ZoneInfo("UTC")) + timedelta(hours=2)
+        end = start + timedelta(hours=2)
+        storage.create_reservation(
+            conn,
+            status="approved",
+            start_utc=start.isoformat(),
+            end_utc=end.isoformat(),
+            dep_icao="KSRQ",
+            dest_icao="KCAK",
+            parked_icao="KCAK",
+            traveling_user_id=int(owner["id"]),
+            requested_by_user_id=int(owner["id"]),
+            notes="Upcoming",
+        )
+
+    client = tbm_app.app.test_client()
+    assert _login(client, "owner@example.com", "ownerpass123").status_code == 200
+    resp = client.get("/api/live-tracking")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["next_reservation"] is not None
+    assert data["next_reservation"]["countdown_minutes"] <= 120
+    assert data["next_reservation"]["countdown_minutes"] >= 0
+
+
+def test_live_tracking_stale_telemetry_recommendation(live_env, monkeypatch):
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_AEROAPI_KEY", "test-key")
+    monkeypatch.setattr(tbm_app, "FLIGHTAWARE_CACHE_TTL_SEC", 0)
+    tbm_app._LIVE_TRACKING_CACHE.clear()
+
+    def fake_get(path, params=None):  # noqa: ARG001
+        if path.startswith("flights/N656W-123/track"):
+            return _sample_track_payload()
+        return _sample_ground_flight_payload(last_position_minutes_ago=800)
+
+    monkeypatch.setattr(tbm_app, "_flightaware_get", fake_get)
+    client = tbm_app.app.test_client()
+    assert _login(client, "owner@example.com", "ownerpass123").status_code == 200
+    resp = client.get("/api/live-tracking")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert any("Telemetry appears stale" in item for item in data["ops_recommendations"])
 
 
 def test_live_tracking_nav_link_visible_for_logged_in_users(live_env):
