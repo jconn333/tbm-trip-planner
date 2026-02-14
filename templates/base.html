@@ -50,8 +50,9 @@
     .tbmCustomSelect{
       position:relative;
       width:100%;
-      z-index:50;
+      z-index:1;
     }
+    .tbmCustomSelect.is-open{ z-index:300; }
     .tbmCustomSelectBtn{
       width:100%;
       text-align:left;
@@ -71,7 +72,7 @@
       max-height:240px;
       overflow:auto;
       display:none;
-      z-index:120;
+      z-index:301;
     }
     .tbmCustomSelectMenu.open{ display:block; }
     .tbmCustomSelectOption{

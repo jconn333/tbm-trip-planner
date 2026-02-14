@@ -126,6 +126,23 @@
     const menu = document.createElement('div');
     menu.className = 'tbmCustomSelectMenu';
 
+    function closeMenu(){
+      menu.classList.remove('open');
+      container.classList.remove('is-open');
+    }
+
+    function openMenu(){
+      document.querySelectorAll('.tbmCustomSelectMenu.open').forEach((openMenuEl) => {
+        if(!(openMenuEl instanceof HTMLElement)) return;
+        if(openMenuEl === menu) return;
+        openMenuEl.classList.remove('open');
+        const parent = openMenuEl.closest('.tbmCustomSelect');
+        if(parent) parent.classList.remove('is-open');
+      });
+      menu.classList.add('open');
+      container.classList.add('is-open');
+    }
+
     function syncTrigger(){
       const selectedOption = selectEl.options[selectEl.selectedIndex];
       trigger.textContent = selectedOption ? selectedOption.textContent : 'Select option';
@@ -149,7 +166,7 @@
           event.stopPropagation();
           selectEl.value = option.value;
           selectEl.dispatchEvent(new Event('change', { bubbles: true }));
-          menu.classList.remove('open');
+          closeMenu();
         });
         menu.appendChild(item);
       });
@@ -159,7 +176,11 @@
     trigger.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      menu.classList.toggle('open');
+      if(menu.classList.contains('open')){
+        closeMenu();
+      } else {
+        openMenu();
+      }
     });
 
     menu.addEventListener('click', (event) => event.stopPropagation());
@@ -168,10 +189,10 @@
     document.addEventListener('click', (event) => {
       const target = event.target;
       if(target instanceof Node && container.contains(target)) return;
-      menu.classList.remove('open');
+      closeMenu();
     });
     document.addEventListener('keydown', (event) => {
-      if(event.key === 'Escape') menu.classList.remove('open');
+      if(event.key === 'Escape') closeMenu();
     });
 
     selectEl.addEventListener('change', syncTrigger);
