@@ -319,6 +319,18 @@
     <div id="detailMsg" class="msg"></div>
   </div>
 </section>
+
+<section id="requestSuccessModal" class="modal">
+  <div class="modalCard">
+    <div class="actions" style="justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <h3 style="margin:0;">Request submitted</h3>
+      <button class="btn" id="requestSuccessCloseBtn" type="button">OK</button>
+    </div>
+    <div class="kv">
+      The admin has been notified. Your trip is pending until approved or denied.
+    </div>
+  </div>
+</section>
 {% endblock %}
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
@@ -349,6 +361,8 @@
     availabilityMeta: document.getElementById('availabilityMeta'),
     reservationDetailModal: document.getElementById('reservationDetailModal'),
     reservationDetailBody: document.getElementById('reservationDetailBody'),
+    requestSuccessModal: document.getElementById('requestSuccessModal'),
+    requestSuccessCloseBtn: document.getElementById('requestSuccessCloseBtn'),
     detailCloseBtn: document.getElementById('detailCloseBtn'),
     detailViewBtn: document.getElementById('detailViewBtn'),
     detailCancelBtn: document.getElementById('detailCancelBtn'),
@@ -458,6 +472,14 @@
     el.reservationDetailModal.classList.remove('open');
     selectedReservation = null;
     setDetailMsg('');
+  }
+
+  function openRequestSuccessModal(){
+    if(el.requestSuccessModal){ el.requestSuccessModal.classList.add('open'); }
+  }
+
+  function closeRequestSuccessModal(){
+    if(el.requestSuccessModal){ el.requestSuccessModal.classList.remove('open'); }
   }
 
   function openReservationDetailModal(reservation){
@@ -812,6 +834,10 @@
     const params = new URLSearchParams(window.location.search);
     const token = (params.get('draft') || '').trim();
     if(!token) return;
+    if(el.requestTripDisclosure && !el.requestTripDisclosure.open){
+      el.requestTripDisclosure.open = true;
+      syncSidebarExpansionState();
+    }
     activeDraftToken = token;
     const resp = await fetch(`/api/planner/quote-drafts/${encodeURIComponent(token)}`);
     const data = await resp.json().catch(()=>({}));
@@ -965,7 +991,8 @@
         setMsg(data.error || 'Draft submission failed.', true);
         return;
       }
-      setMsg('Roundtrip requests submitted from quote draft.');
+      setMsg('');
+      openRequestSuccessModal();
       activeDraftData = null;
       activeDraftToken = '';
       renderDraftPanel();
@@ -1023,12 +1050,14 @@
     if(editingId){
       setMsg('Pending request updated and re-submitted.');
     } else if(isOneWayDraftSubmit){
-      setMsg('Reservation request submitted from quote draft.');
+      setMsg('');
+      openRequestSuccessModal();
       activeDraftData = null;
       activeDraftToken = '';
       renderDraftPanel();
     } else {
-      setMsg('Reservation request submitted.');
+      setMsg('');
+      openRequestSuccessModal();
     }
     resetForm();
     calendar.refetchEvents();
@@ -1049,11 +1078,21 @@
   });
 
   el.detailCloseBtn.addEventListener('click', () => closeReservationDetailModal());
+  if(el.requestSuccessCloseBtn){
+    el.requestSuccessCloseBtn.addEventListener('click', () => closeRequestSuccessModal());
+  }
   el.reservationDetailModal.addEventListener('click', (event)=>{
     if(event.target === el.reservationDetailModal){
       closeReservationDetailModal();
     }
   });
+  if(el.requestSuccessModal){
+    el.requestSuccessModal.addEventListener('click', (event)=>{
+      if(event.target === el.requestSuccessModal){
+        closeRequestSuccessModal();
+      }
+    });
+  }
   el.detailViewBtn.addEventListener('click', ()=>{
     if(!selectedReservation) return;
     window.location.href = `/reservations/${encodeURIComponent(String(selectedReservation.id || ''))}`;
@@ -1081,6 +1120,11 @@
     calendar.refetchEvents();
     loadMyPendingReservations();
     loadSummary();
+  });
+  document.addEventListener('keydown', (event)=>{
+    if(event.key === 'Escape' && el.requestSuccessModal && el.requestSuccessModal.classList.contains('open')){
+      closeRequestSuccessModal();
+    }
   });
 
   loadOwners();

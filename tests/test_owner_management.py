@@ -353,3 +353,32 @@ def test_view_as_allows_disabled_and_must_reset_owner_with_warning(tmp_path, mon
     assert "Viewing as Locked Owner" in body
     assert "target owner is disabled" in body
     assert "must-reset-password" in body
+
+
+def test_admin_email_logs_endpoint_returns_rows(tmp_path, monkeypatch):
+    _setup_env(tmp_path, monkeypatch)
+    admin = tbm_app.app.test_client()
+    assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
+
+    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+        admin_row = storage.get_user_by_email(conn, "admin@example.com")
+        storage.create_email_notification_log(
+            conn,
+            audience="admin",
+            source="direct_request",
+            to_addresses="admin@example.com",
+            subject="New trip request to review",
+            status="sent",
+            error_message=None,
+            reservation_ids_json="[12]",
+            actor_user_id=int(admin_row["id"]),
+        )
+
+    resp = admin.get("/api/admin/email-logs?page=1&page_size=10")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert int(body["total"]) >= 1
+    assert len(body["items"]) >= 1
+    first = body["items"][0]
+    assert first["audience"] == "admin"
+    assert first["status"] in ("sent", "failed", "skipped")

@@ -38,6 +38,125 @@ def test_location_query_candidates_city_state():
     assert "Trenton, MO, USA" in candidates
 
 
+def test_smtp_send_email_success(monkeypatch):
+    calls = {"starttls": 0, "login": 0, "send": 0}
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout):
+            assert host == "smtp.test.local"
+            assert port == 587
+            assert timeout == 8
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            calls["starttls"] += 1
+
+        def login(self, username, password):
+            assert username == "user"
+            assert password == "pass"
+            calls["login"] += 1
+
+        def send_message(self, msg):
+            assert msg["Subject"] == "Test Subject"
+            calls["send"] += 1
+
+    monkeypatch.setattr(tbm_app, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_HOST", "smtp.test.local")
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_PORT", 587)
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_USERNAME", "user")
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_PASSWORD", "pass")
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_USE_TLS", True)
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_USE_SSL", False)
+    monkeypatch.setattr(tbm_app, "EMAIL_FROM_ADDRESS", "noreply@test.local")
+    monkeypatch.setattr(tbm_app, "EMAIL_FROM_NAME", "TBM Test")
+    monkeypatch.setattr(tbm_app, "EMAIL_REPLY_TO", "")
+    monkeypatch.setattr(tbm_app, "EMAIL_TIMEOUT_SEC", 8)
+    monkeypatch.setattr(tbm_app.smtplib, "SMTP", FakeSMTP)
+
+    ok = tbm_app._smtp_send_email(to_addrs=["owner@example.com"], subject="Test Subject", body_text="hello")
+    assert ok is True
+    assert calls["starttls"] == 1
+    assert calls["login"] == 1
+    assert calls["send"] == 1
+
+
+def test_smtp_send_email_failure_returns_false(monkeypatch):
+    class BoomSMTP:
+        def __init__(self, host, port, timeout):
+            raise RuntimeError("smtp down")
+
+    monkeypatch.setattr(tbm_app, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_HOST", "smtp.test.local")
+    monkeypatch.setattr(tbm_app, "EMAIL_FROM_ADDRESS", "noreply@test.local")
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_USE_SSL", False)
+    monkeypatch.setattr(tbm_app.smtplib, "SMTP", BoomSMTP)
+
+    ok = tbm_app._smtp_send_email(to_addrs=["owner@example.com"], subject="Test Subject", body_text="hello")
+    assert ok is False
+
+
+def test_build_reservation_email_context_single_and_multi():
+    requester = {"name": "Owner One", "email": "owner1@example.com"}
+    rows = [
+        {
+            "id": 101,
+            "dep_icao": "KCAK",
+            "dest_icao": "KSRQ",
+            "start_utc": "2030-02-01T14:00:00+00:00",
+            "end_utc": "2030-02-01T17:00:00+00:00",
+            "notes": "First leg",
+        },
+        {
+            "id": 102,
+            "dep_icao": "KSRQ",
+            "dest_icao": "KCAK",
+            "start_utc": "2030-02-02T14:00:00+00:00",
+            "end_utc": "2030-02-02T17:00:00+00:00",
+            "notes": "",
+        },
+    ]
+    context = tbm_app._build_reservation_email_context(rows, requester)
+    assert context["requester_email"] == "owner1@example.com"
+    assert context["reservation_ids"] == [101, 102]
+    assert len(context["legs"]) == 2
+    assert context["legs"][0]["dep_icao"] == "KCAK"
+
+
+def test_send_requester_decision_email_builds_subject(monkeypatch):
+    sent = {}
+    monkeypatch.setattr(
+        tbm_app,
+        "_smtp_send_email",
+        lambda *, to_addrs, subject, body_text, **_kwargs: sent.update({"to": to_addrs, "subject": subject, "body": body_text}) or True,
+    )
+    monkeypatch.setattr(tbm_app, "EMAIL_SUBJECT_PREFIX", "[TBM]")
+    context = {
+        "requester_name": "Owner One",
+        "requester_email": "owner1@example.com",
+        "reservation_id": 101,
+        "dep_icao": "KCAK",
+        "dest_icao": "KSRQ",
+        "start_display": "02-01-2030 09:00",
+        "end_display": "02-01-2030 12:00",
+        "timezone": "America/New_York",
+    }
+    ok = tbm_app._send_requester_decision_email(
+        context,
+        decision="approved",
+        decision_note="",
+        actor_name="Admin",
+        source="reservation_approved",
+    )
+    assert ok is True
+    assert sent["to"] == ["owner1@example.com"]
+    assert sent["subject"] == "[TBM] Trip request approved"
+
+
 @pytest.fixture
 def no_winds(monkeypatch):
     monkeypatch.setattr(

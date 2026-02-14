@@ -118,6 +118,32 @@
       white-space:nowrap;
       flex:0 0 auto;
     }
+    .jsHealthBanner{
+      display:none;
+      margin:10px 0 6px;
+      border:1px solid color-mix(in srgb, #e5c8a2 78%, var(--color-border));
+      border-radius:12px;
+      background: color-mix(in srgb, #fff6ea 78%, white);
+      padding:10px 12px;
+      color:var(--color-text-strong);
+      font-size:12.5px;
+      line-height:1.35;
+    }
+    .jsHealthBannerTitle{
+      font-weight:700;
+      margin-bottom:2px;
+    }
+    .jsHealthBanner.is-visible{ display:block; }
+    .noScriptBanner{
+      margin:10px 0 6px;
+      border:1px solid color-mix(in srgb, #e2acb3 72%, var(--color-border));
+      border-radius:12px;
+      background: color-mix(in srgb, #fff1f3 78%, white);
+      padding:10px 12px;
+      color:var(--color-text-strong);
+      font-size:12.5px;
+      line-height:1.35;
+    }
 
     {% block page_styles %}{% endblock %}
   </style>
@@ -270,6 +296,17 @@
         <button id="stopImpersonationBtn" class="impersonationStopBtn" type="button">Stop Viewing</button>
       </section>
     {% endif %}
+
+    <noscript>
+      <section class="noScriptBanner" role="alert">
+        JavaScript is disabled. Some features (calendar actions, address lookup, and live UI updates) will not work.
+      </section>
+    </noscript>
+
+    <section id="jsHealthBanner" class="jsHealthBanner" role="alert" aria-live="polite">
+      <div class="jsHealthBannerTitle">Some app features may be blocked by a browser extension.</div>
+      <div id="jsHealthBannerDetail">Try disabling ad/privacy blockers for this site and refresh.</div>
+    </section>
 
     <main>
       {% block content %}{% endblock %}
@@ -560,6 +597,20 @@
           window.location.href = '/admin';
         });
       }
+
+      window.setTimeout(() => {
+        const banner = document.getElementById('jsHealthBanner');
+        const detail = document.getElementById('jsHealthBannerDetail');
+        if(!(banner instanceof HTMLElement)) return;
+        const missing = [];
+        if(!window.TBMReservationUI) missing.push('reservation UI');
+        if(!window.TBMDateTimeBox) missing.push('date/time controls');
+        if(!missing.length) return;
+        if(detail instanceof HTMLElement){
+          detail.textContent = `Core scripts did not load (${missing.join(', ')}). Disable blockers for this site and refresh.`;
+        }
+        banner.classList.add('is-visible');
+      }, 250);
     })();
   </script>
   {% block scripts %}{% endblock %}

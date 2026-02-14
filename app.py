@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import sqlite3
+import smtplib
 import ssl
 import secrets
 import time
@@ -13,6 +14,8 @@ import urllib.request
 import uuid
 from collections import defaultdict, deque
 from datetime import date, datetime, timedelta
+from email.message import EmailMessage
+from email.utils import formataddr
 from math import asin, atan2, cos, degrees, radians, sin, sqrt
 from threading import Lock
 from zoneinfo import ZoneInfo
@@ -22,7 +25,7 @@ import certifi
 import db as storage
 from auth import admin_required, hash_password, login_required, login_user, verify_password
 from dotenv import load_dotenv
-from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, has_request_context
 from routes_auth import create_auth_blueprint
 from routes_reservations import create_reservations_blueprint
 
@@ -122,6 +125,19 @@ GEOCODE_ENABLE_CENSUS_FALLBACK = (os.getenv("GEOCODE_ENABLE_CENSUS_FALLBACK") or
     "yes",
     "on",
 )
+EMAIL_ENABLED = (os.getenv("EMAIL_ENABLED") or "false").strip().lower() in ("1", "true", "yes", "on")
+EMAIL_SMTP_HOST = (os.getenv("EMAIL_SMTP_HOST") or "").strip()
+EMAIL_SMTP_PORT = _env_int("EMAIL_SMTP_PORT", 587)
+EMAIL_SMTP_USERNAME = (os.getenv("EMAIL_SMTP_USERNAME") or "").strip()
+EMAIL_SMTP_PASSWORD = os.getenv("EMAIL_SMTP_PASSWORD") or ""
+EMAIL_SMTP_USE_TLS = (os.getenv("EMAIL_SMTP_USE_TLS") or "true").strip().lower() in ("1", "true", "yes", "on")
+EMAIL_SMTP_USE_SSL = (os.getenv("EMAIL_SMTP_USE_SSL") or "false").strip().lower() in ("1", "true", "yes", "on")
+EMAIL_FROM_ADDRESS = (os.getenv("EMAIL_FROM_ADDRESS") or "").strip()
+EMAIL_FROM_NAME = (os.getenv("EMAIL_FROM_NAME") or "TBM Flight Portal").strip()
+EMAIL_REPLY_TO = (os.getenv("EMAIL_REPLY_TO") or "").strip()
+EMAIL_TIMEOUT_SEC = _env_int("EMAIL_TIMEOUT_SEC", 8)
+EMAIL_SUBJECT_PREFIX = (os.getenv("EMAIL_SUBJECT_PREFIX") or "").strip()
+EMAIL_ADMIN_REVIEW_URL = (os.getenv("EMAIL_ADMIN_REVIEW_URL") or "").strip()
 AIRPORT_META_TIMEOUT_SEC = _env_int("AIRPORT_META_TIMEOUT_SEC", 8)
 AIRPORT_META_CACHE_TTL_SEC = _env_int("AIRPORT_META_CACHE_TTL_SEC", 21600)
 AIRPORT_META_CACHE_MAX_KEYS = _env_int("AIRPORT_META_CACHE_MAX_KEYS", 512)
@@ -420,6 +436,364 @@ def _parse_local_datetime(raw: str | None) -> datetime | None:
     else:
         dt = dt.astimezone(_home_zone())
     return dt
+
+
+def _email_subject(text: str) -> str:
+    prefix = EMAIL_SUBJECT_PREFIX.strip()
+    if not prefix:
+        return text
+    return f"{prefix} {text}"
+
+
+def _email_enabled_and_configured() -> bool:
+    if not EMAIL_ENABLED:
+        return False
+    return bool(EMAIL_SMTP_HOST and EMAIL_FROM_ADDRESS)
+
+
+def _admin_review_url() -> str:
+    if EMAIL_ADMIN_REVIEW_URL:
+        return EMAIL_ADMIN_REVIEW_URL
+    if has_request_context():
+        try:
+            return urllib.parse.urljoin(request.url_root, url_for("admin_page").lstrip("/"))
+        except Exception:
+            pass
+    return "/admin"
+
+
+def _smtp_send_email(
+    *,
+    to_addrs: list[str],
+    subject: str,
+    body_text: str,
+    audience: str = "unknown",
+    source: str = "",
+    reservation_ids: list[int] | None = None,
+    actor_user_id: int | None = None,
+) -> bool:
+    recipients = [str(addr).strip() for addr in (to_addrs or []) if str(addr).strip()]
+    if not recipients:
+        _record_email_log(
+            audience=audience,
+            source=source,
+            to_addrs=[],
+            subject=subject,
+            status="skipped",
+            reservation_ids=reservation_ids,
+            actor_user_id=actor_user_id,
+            error_message="No recipients",
+        )
+        return False
+    if not _email_enabled_and_configured():
+        logger.info("email_skipped_not_configured recipients=%s", len(recipients))
+        _record_email_log(
+            audience=audience,
+            source=source,
+            to_addrs=recipients,
+            subject=subject,
+            status="skipped",
+            reservation_ids=reservation_ids,
+            actor_user_id=actor_user_id,
+            error_message="Email disabled or SMTP not configured",
+        )
+        return False
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = formataddr((EMAIL_FROM_NAME, EMAIL_FROM_ADDRESS))
+    msg["To"] = ", ".join(recipients)
+    if EMAIL_REPLY_TO:
+        msg["Reply-To"] = EMAIL_REPLY_TO
+    msg.set_content(body_text or "")
+
+    started = time.perf_counter()
+    try:
+        if EMAIL_SMTP_USE_SSL:
+            server = smtplib.SMTP_SSL(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=EMAIL_TIMEOUT_SEC)
+        else:
+            server = smtplib.SMTP(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=EMAIL_TIMEOUT_SEC)
+        with server:
+            if EMAIL_SMTP_USE_TLS and not EMAIL_SMTP_USE_SSL:
+                server.starttls(context=ssl.create_default_context())
+            if EMAIL_SMTP_USERNAME:
+                server.login(EMAIL_SMTP_USERNAME, EMAIL_SMTP_PASSWORD)
+            server.send_message(msg)
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        logger.info("email_send_ok recipients=%s latency_ms=%.1f subject=%s", len(recipients), elapsed_ms, subject[:120])
+        _record_email_log(
+            audience=audience,
+            source=source,
+            to_addrs=recipients,
+            subject=subject,
+            status="sent",
+            reservation_ids=reservation_ids,
+            actor_user_id=actor_user_id,
+        )
+        return True
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        logger.exception("email_send_failed recipients=%s latency_ms=%.1f subject=%s", len(recipients), elapsed_ms, subject[:120])
+        _record_email_log(
+            audience=audience,
+            source=source,
+            to_addrs=recipients,
+            subject=subject,
+            status="failed",
+            reservation_ids=reservation_ids,
+            actor_user_id=actor_user_id,
+            error_message=str(exc),
+        )
+        return False
+
+
+def _record_email_log(
+    *,
+    audience: str,
+    source: str,
+    to_addrs: list[str],
+    subject: str,
+    status: str,
+    reservation_ids: list[int] | None = None,
+    actor_user_id: int | None = None,
+    error_message: str | None = None,
+) -> None:
+    try:
+        with _db_conn() as conn:
+            storage.create_email_notification_log(
+                conn,
+                audience=audience,
+                source=source,
+                to_addresses=", ".join([str(addr).strip() for addr in (to_addrs or []) if str(addr).strip()]),
+                subject=subject,
+                status=status,
+                error_message=error_message,
+                reservation_ids_json=(json.dumps([int(item) for item in (reservation_ids or [])]) if reservation_ids else None),
+                actor_user_id=actor_user_id,
+            )
+    except Exception:
+        logger.exception("email_log_write_failed audience=%s source=%s status=%s", audience, source, status)
+
+
+def _build_reservation_email_context(created_rows, requester_user) -> dict:
+    rows = list(created_rows or [])
+    legs = []
+    reservation_ids = []
+    for row in rows:
+        try:
+            reservation_ids.append(int(row["id"]))
+            legs.append(
+                {
+                    "reservation_id": int(row["id"]),
+                    "dep_icao": str(row["dep_icao"]),
+                    "dest_icao": str(row["dest_icao"]),
+                    "start_display": _utc_iso_to_local_display(str(row["start_utc"])),
+                    "end_display": _utc_iso_to_local_display(str(row["end_utc"])),
+                    "notes": str(row["notes"] or "").strip(),
+                }
+            )
+        except Exception:
+            continue
+    return {
+        "requester_name": str((requester_user or {}).get("name") or "Owner").strip(),
+        "requester_email": str((requester_user or {}).get("email") or "").strip().lower(),
+        "reservation_ids": reservation_ids,
+        "legs": legs,
+        "review_url": _admin_review_url(),
+        "timezone": _effective_home_timezone_name(),
+    }
+
+
+def _send_requester_submission_email(context: dict, *, source: str, actor_user_id: int | None = None) -> bool:
+    to_email = str(context.get("requester_email") or "").strip().lower()
+    if not to_email:
+        return False
+    legs = context.get("legs") or []
+    lines = [
+        f"Hi {context.get('requester_name') or 'there'},",
+        "",
+        "Your trip request was submitted successfully.",
+        "The admin has been notified. Your trip is pending until approved or denied.",
+        "",
+        f"Timezone: {context.get('timezone') or 'local'}",
+        "",
+        "Submitted legs:",
+    ]
+    for leg in legs:
+        lines.append(
+            (
+                f"- #{leg['reservation_id']}: {leg['dep_icao']} -> {leg['dest_icao']} | "
+                f"{leg['start_display']} to {leg['end_display']}"
+            )
+        )
+        if leg.get("notes"):
+            lines.append(f"  Notes: {leg['notes']}")
+    lines.extend(["", "Thanks,", "TBM Flight Portal"])
+    return _smtp_send_email(
+        to_addrs=[to_email],
+        subject=_email_subject("Trip request submitted (pending review)"),
+        body_text="\n".join(lines),
+        audience="requester",
+        source=source,
+        reservation_ids=[int(item) for item in (context.get("reservation_ids") or [])],
+        actor_user_id=actor_user_id,
+    )
+
+
+def _send_admin_new_request_email(
+    context: dict,
+    admin_recipients: list[str],
+    *,
+    source: str,
+    actor_user_id: int | None = None,
+) -> bool:
+    recipients = [str(addr).strip().lower() for addr in (admin_recipients or []) if str(addr).strip()]
+    if not recipients:
+        return False
+    legs = context.get("legs") or []
+    lines = [
+        "A new trip request is pending review.",
+        "",
+        f"Requester: {context.get('requester_name') or 'Unknown'} ({context.get('requester_email') or 'unknown'})",
+        f"Timezone: {context.get('timezone') or 'local'}",
+        "",
+        "Pending legs:",
+    ]
+    for leg in legs:
+        lines.append(
+            (
+                f"- #{leg['reservation_id']}: {leg['dep_icao']} -> {leg['dest_icao']} | "
+                f"{leg['start_display']} to {leg['end_display']}"
+            )
+        )
+        if leg.get("notes"):
+            lines.append(f"  Notes: {leg['notes']}")
+    lines.extend(["", f"Review: {context.get('review_url') or '/admin'}", "", "TBM Flight Portal"])
+    return _smtp_send_email(
+        to_addrs=recipients,
+        subject=_email_subject("New trip request to review"),
+        body_text="\n".join(lines),
+        audience="admin",
+        source=source,
+        reservation_ids=[int(item) for item in (context.get("reservation_ids") or [])],
+        actor_user_id=actor_user_id,
+    )
+
+
+def _notify_new_pending_reservations(*, created_rows, requester_user, source: str) -> None:
+    try:
+        context = _build_reservation_email_context(created_rows, requester_user)
+        reservation_ids = context.get("reservation_ids") or []
+        actor_user_id = int((requester_user or {}).get("id")) if (requester_user or {}).get("id") is not None else None
+        requester_ok = _send_requester_submission_email(context, source=source, actor_user_id=actor_user_id)
+        with _db_conn() as conn:
+            admin_rows = storage.list_admin_users(conn)
+        admin_emails = [str(row["email"]).strip().lower() for row in admin_rows if str(row["email"] or "").strip()]
+        admin_ok = _send_admin_new_request_email(context, admin_emails, source=source, actor_user_id=actor_user_id)
+        logger.info(
+            "reservation_notifications_complete source=%s requester_ok=%s admin_ok=%s admin_recipients=%s reservation_ids=%s",
+            source,
+            requester_ok,
+            admin_ok,
+            len(admin_emails),
+            ",".join(str(item) for item in reservation_ids),
+        )
+    except Exception:
+        logger.exception("reservation_notifications_failed source=%s", source)
+
+
+def _build_reservation_decision_email_context(reservation_row, requester_user) -> dict:
+    row = reservation_row or {}
+    notes = ""
+    try:
+        notes = str(row["notes"] or "").strip()
+    except Exception:
+        notes = ""
+    return {
+        "requester_name": str((requester_user or {}).get("name") or "Owner").strip(),
+        "requester_email": str((requester_user or {}).get("email") or "").strip().lower(),
+        "reservation_id": int(row["id"]),
+        "dep_icao": str(row["dep_icao"]),
+        "dest_icao": str(row["dest_icao"]),
+        "start_display": _utc_iso_to_local_display(str(row["start_utc"])),
+        "end_display": _utc_iso_to_local_display(str(row["end_utc"])),
+        "notes": notes,
+        "timezone": _effective_home_timezone_name(),
+    }
+
+
+def _send_requester_decision_email(
+    context: dict,
+    *,
+    decision: str,
+    decision_note: str,
+    actor_name: str,
+    source: str,
+    actor_user_id: int | None = None,
+) -> bool:
+    to_email = str(context.get("requester_email") or "").strip().lower()
+    if not to_email:
+        return False
+    decision_norm = "approved" if str(decision).strip().lower() == "approved" else "denied"
+    subject_text = "Trip request approved" if decision_norm == "approved" else "Trip request denied"
+    lines = [
+        f"Hi {context.get('requester_name') or 'there'},",
+        "",
+        (
+            "Your trip request has been approved."
+            if decision_norm == "approved"
+            else "Your trip request has been denied."
+        ),
+        "",
+        f"Reservation #{context.get('reservation_id')}: {context.get('dep_icao')} -> {context.get('dest_icao')}",
+        f"Time ({context.get('timezone')}): {context.get('start_display')} to {context.get('end_display')}",
+    ]
+    if decision_note:
+        lines.append(f"Decision note: {decision_note}")
+    if actor_name:
+        lines.append(f"Reviewed by: {actor_name}")
+    lines.extend(["", "TBM Flight Portal"])
+    return _smtp_send_email(
+        to_addrs=[to_email],
+        subject=_email_subject(subject_text),
+        body_text="\n".join(lines),
+        audience="requester",
+        source=source,
+        reservation_ids=[int(context.get("reservation_id"))] if context.get("reservation_id") is not None else [],
+        actor_user_id=actor_user_id,
+    )
+
+
+def _notify_reservation_decision(*, reservation_row, decision: str, decision_note: str, actor_user) -> None:
+    try:
+        with _db_conn() as conn:
+            requester_row = storage.get_user_by_id(conn, int(reservation_row["requested_by_user_id"]))
+        if not requester_row:
+            logger.info("decision_email_skipped_no_requester reservation_id=%s", reservation_row["id"])
+            return
+        requester_user = _serialize_user(requester_row)
+        context = _build_reservation_decision_email_context(reservation_row, requester_user)
+        actor_name = str((actor_user or {}).get("name") or "").strip()
+        ok = _send_requester_decision_email(
+            context,
+            decision=decision,
+            decision_note=(decision_note or "").strip(),
+            actor_name=actor_name,
+            source=f"reservation_{decision}",
+            actor_user_id=(int((actor_user or {}).get("id")) if (actor_user or {}).get("id") is not None else None),
+        )
+        logger.info(
+            "reservation_decision_notification_complete reservation_id=%s decision=%s requester_ok=%s",
+            reservation_row["id"],
+            decision,
+            ok,
+        )
+    except Exception:
+        logger.exception(
+            "reservation_decision_notification_failed reservation_id=%s decision=%s",
+            (reservation_row or {}).get("id"),
+            decision,
+        )
 
 
 def _extract_local_datetime_from_payload(
@@ -923,7 +1297,7 @@ def _build_quote_draft_payload(estimate_data: dict, outbound_departure_local: da
             "start_local": _iso_local_minute(outbound_departure_local),
             "end_local": _iso_local_minute(outbound_end),
             "duration_minutes": int(outbound["duration_minutes"]),
-            "notes": f"Quote-based {estimate_data['trip_type']} request ({outbound['dep_icao']} → {outbound['dest_icao']}).",
+            "notes": "",
         }
     )
     if estimate_data["trip_type"] == "roundtrip":
@@ -937,7 +1311,7 @@ def _build_quote_draft_payload(estimate_data: dict, outbound_departure_local: da
                 "start_local": _iso_local_minute(return_start),
                 "end_local": _iso_local_minute(return_end),
                 "duration_minutes": int(return_leg["duration_minutes"]),
-                "notes": f"Quote-based {estimate_data['trip_type']} request ({return_leg['dep_icao']} → {return_leg['dest_icao']}).",
+                "notes": "",
             }
         )
     return {
@@ -2913,6 +3287,8 @@ app.register_blueprint(
         can_reopen_reservation=_can_reopen_reservation,
         utc_now=_utc_now,
         default_parked_icao=TBM_DEFAULT_PARKED_ICAO,
+        notify_new_pending_reservations=_notify_new_pending_reservations,
+        notify_reservation_decision=_notify_reservation_decision,
     )
 )
 
@@ -3529,6 +3905,61 @@ def api_admin_owner_audit():
     return jsonify({"items": rows, "total": int(result["total"]), "page": page, "page_size": page_size})
 
 
+@app.get("/api/admin/email-logs")
+@admin_required
+def api_admin_email_logs():
+    audience = (request.args.get("audience") or "").strip().lower()
+    status = (request.args.get("status") or "").strip().lower()
+    page_raw = (request.args.get("page") or "1").strip()
+    page_size_raw = (request.args.get("page_size") or "25").strip()
+    try:
+        page = max(1, int(page_raw))
+    except Exception:
+        return _json_error("page must be an integer.", 400, "invalid_page", "page")
+    try:
+        page_size = max(1, min(100, int(page_size_raw)))
+    except Exception:
+        return _json_error("page_size must be an integer.", 400, "invalid_page_size", "page_size")
+    if audience and audience not in {"requester", "admin", "unknown"}:
+        return _json_error("audience must be requester, admin, or unknown.", 400, "invalid_audience", "audience")
+    if status and status not in {"sent", "failed", "skipped"}:
+        return _json_error("status must be sent, failed, or skipped.", 400, "invalid_status", "status")
+    with _db_conn() as conn:
+        result = storage.list_email_notification_logs(
+            conn,
+            audience=audience or None,
+            status=status or None,
+            page=page,
+            page_size=page_size,
+        )
+    items = []
+    for row in result["rows"]:
+        reservation_ids = []
+        if row["reservation_ids_json"]:
+            try:
+                parsed = json.loads(row["reservation_ids_json"])
+                if isinstance(parsed, list):
+                    reservation_ids = [int(item) for item in parsed]
+            except Exception:
+                reservation_ids = []
+        items.append(
+            {
+                "id": int(row["id"]),
+                "audience": row["audience"],
+                "source": row["source"],
+                "to_addresses": row["to_addresses"],
+                "subject": row["subject"],
+                "status": row["status"],
+                "error_message": row["error_message"] or "",
+                "reservation_ids": reservation_ids,
+                "actor_user_id": int(row["actor_user_id"]) if row["actor_user_id"] is not None else None,
+                "actor_name": row["actor_name"] or row["actor_email"] or "System",
+                "created_at": _utc_iso_to_local_iso(row["created_at_utc"]),
+            }
+        )
+    return jsonify({"items": items, "total": int(result["total"]), "page": page, "page_size": page_size})
+
+
 @app.get("/api/admin/settings")
 @admin_required
 def api_admin_settings():
@@ -4127,6 +4558,15 @@ def api_submit_planner_quote_draft(token: str):
         except Exception:
             conn.rollback()
             raise
+
+    try:
+        _notify_new_pending_reservations(
+            created_rows=created_rows,
+            requester_user=g.current_user,
+            source="quote_draft_submit",
+        )
+    except Exception:
+        pass
 
     return jsonify(
         {

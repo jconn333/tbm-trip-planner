@@ -203,6 +203,31 @@ def migrate_if_needed(conn: sqlite3.Connection) -> None:
             PRAGMA user_version = 5;
             """
         )
+        version = 5
+
+    if version < 6:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS email_notification_logs (
+                id INTEGER PRIMARY KEY,
+                audience TEXT NOT NULL,
+                source TEXT NOT NULL,
+                to_addresses TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('sent','failed','skipped')),
+                error_message TEXT,
+                reservation_ids_json TEXT,
+                actor_user_id INTEGER REFERENCES users(id),
+                created_at_utc TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_email_logs_created ON email_notification_logs(created_at_utc DESC);
+            CREATE INDEX IF NOT EXISTS idx_email_logs_status_created ON email_notification_logs(status, created_at_utc DESC);
+            CREATE INDEX IF NOT EXISTS idx_email_logs_audience_created ON email_notification_logs(audience, created_at_utc DESC);
+
+            PRAGMA user_version = 6;
+            """
+        )
 
 
 def seed_settings_defaults(conn: sqlite3.Connection, defaults: dict[str, str]) -> None:
@@ -313,6 +338,18 @@ def get_user_by_email(conn: sqlite3.Connection, email: str):
 def list_owner_users(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT * FROM users WHERE role = 'owner' ORDER BY lower(name), lower(email)"
+    ).fetchall()
+
+
+def list_admin_users(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT *
+        FROM users
+        WHERE role = 'admin'
+          AND COALESCE(is_disabled, 0) = 0
+        ORDER BY lower(name), lower(email)
+        """
     ).fetchall()
 
 
@@ -530,6 +567,74 @@ def list_owner_audit_events(
         LEFT JOIN users a ON a.id = ev.actor_user_id
         WHERE {where_sql}
         ORDER BY ev.created_at_utc DESC, ev.id DESC
+        LIMIT ? OFFSET ?
+        """,
+        tuple([*params, int(page_size), int(offset)]),
+    ).fetchall()
+    return {"total": int(total), "rows": rows}
+
+
+def create_email_notification_log(
+    conn: sqlite3.Connection,
+    *,
+    audience: str,
+    source: str,
+    to_addresses: str,
+    subject: str,
+    status: str,
+    error_message: str | None = None,
+    reservation_ids_json: str | None = None,
+    actor_user_id: int | None = None,
+):
+    now = utc_now_iso()
+    conn.execute(
+        """
+        INSERT INTO email_notification_logs (
+            audience, source, to_addresses, subject, status, error_message,
+            reservation_ids_json, actor_user_id, created_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(audience or ""),
+            str(source or ""),
+            str(to_addresses or ""),
+            str(subject or ""),
+            str(status or ""),
+            (str(error_message) if error_message else None),
+            reservation_ids_json,
+            actor_user_id,
+            now,
+        ),
+    )
+    conn.commit()
+
+
+def list_email_notification_logs(
+    conn: sqlite3.Connection,
+    *,
+    audience: str | None,
+    status: str | None,
+    page: int,
+    page_size: int,
+):
+    where = ["1=1"]
+    params: list[object] = []
+    if audience:
+        where.append("l.audience = ?")
+        params.append(str(audience))
+    if status:
+        where.append("l.status = ?")
+        params.append(str(status))
+    where_sql = " AND ".join(where)
+    total = conn.execute(f"SELECT COUNT(1) FROM email_notification_logs l WHERE {where_sql}", tuple(params)).fetchone()[0]
+    offset = (max(1, int(page)) - 1) * int(page_size)
+    rows = conn.execute(
+        f"""
+        SELECT l.*, u.name AS actor_name, u.email AS actor_email
+        FROM email_notification_logs l
+        LEFT JOIN users u ON u.id = l.actor_user_id
+        WHERE {where_sql}
+        ORDER BY l.created_at_utc DESC, l.id DESC
         LIMIT ? OFFSET ?
         """,
         tuple([*params, int(page_size), int(offset)]),

@@ -108,6 +108,11 @@
   <h3>Owner Audit</h3>
   <div id="ownerAudit" class="auditList"><div class="muted">Loading audit events...</div></div>
 </section>
+
+<section class="panel" style="margin-top:12px;">
+  <h3>Email Logs</h3>
+  <div id="emailLogs" class="auditList"><div class="muted">Loading email logs...</div></div>
+</section>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -117,6 +122,7 @@
   const ownerSearch = document.getElementById('ownerSearch');
   const ownerList = document.getElementById('ownerList');
   const ownerAudit = document.getElementById('ownerAudit');
+  const emailLogs = document.getElementById('emailLogs');
   const createOwnerMsg = document.getElementById('createOwnerMsg');
   const createMode = document.getElementById('createMode');
   const tempPasswordField = document.getElementById('tempPasswordField');
@@ -269,6 +275,23 @@
     `).join('');
   }
 
+  async function loadEmailLogs(){
+    const resp = await fetch('/api/admin/email-logs?page=1&page_size=30');
+    if(!resp.ok){ emailLogs.innerHTML = '<div class="muted">Could not load email logs.</div>'; return; }
+    const data = await resp.json();
+    const items = data.items || [];
+    if(!items.length){ emailLogs.innerHTML = '<div class="muted">No email logs yet.</div>'; return; }
+    emailLogs.innerHTML = items.map((item)=>`
+      <div class="auditItem">
+        <div><strong>${item.status.toUpperCase()}</strong> - ${item.audience} (${item.source || 'n/a'})</div>
+        <div class="muted">${formatLocalDateTime(item.created_at)} · To: ${item.to_addresses || '-'}</div>
+        <div class="muted">Subject: ${item.subject || '-'}</div>
+        ${item.reservation_ids && item.reservation_ids.length ? `<div class="muted">Reservations: ${item.reservation_ids.join(', ')}</div>` : ''}
+        ${item.error_message ? `<div class="muted">Error: ${item.error_message}</div>` : ''}
+      </div>
+    `).join('');
+  }
+
   pendingWrap.addEventListener('click', async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
@@ -311,6 +334,7 @@
     }
     await loadOwners();
     await loadAudit();
+    await loadEmailLogs();
   });
 
   copyInviteBtn.addEventListener('click', async () => {
@@ -378,6 +402,7 @@
     }
     await loadOwners();
     await loadAudit();
+    await loadEmailLogs();
   });
 
   ownerSearch.addEventListener('input', renderOwners);
@@ -396,6 +421,7 @@
   loadPending();
   loadOwners();
   loadAudit();
+  loadEmailLogs();
 })();
 </script>
 {% endblock %}
