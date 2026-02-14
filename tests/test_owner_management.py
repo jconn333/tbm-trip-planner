@@ -235,3 +235,121 @@ def test_admin_update_owner_email_rejects_duplicate(tmp_path, monkeypatch):
     conflict = admin.patch(f"/api/owners/{second_id}", json={"email": "one@example.com"})
     assert conflict.status_code == 409
     assert conflict.get_json()["code"] == "owner_exists"
+
+
+def test_admin_can_start_and_stop_view_as_owner(tmp_path, monkeypatch):
+    _setup_env(tmp_path, monkeypatch)
+    admin = tbm_app.app.test_client()
+    assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
+
+    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+        owner = storage.get_user_by_email(conn, "owner@example.com")
+        owner_id = int(owner["id"])
+
+    started = admin.post(f"/api/admin/view-as/{owner_id}")
+    assert started.status_code == 200
+    started_body = started.get_json()
+    assert started_body["ok"] is True
+    assert int(started_body["impersonation"]["target_user_id"]) == owner_id
+    assert started_body["acting_as_user"]["role"] == "owner"
+
+    with admin.session_transaction() as sess:
+        assert int(sess.get("user_id")) == owner_id
+        assert int(sess.get("impersonator_admin_user_id")) > 0
+        assert int(sess.get("impersonation_target_user_id")) == owner_id
+        assert bool(sess.get("impersonation_started_at_utc")) is True
+
+    admin_page = admin.get("/admin")
+    assert admin_page.status_code == 302
+    assert "/calendar" in (admin_page.headers.get("Location") or "")
+
+    owner_page = admin.get("/my-flights")
+    assert owner_page.status_code == 200
+    assert "Viewing as" in owner_page.get_data(as_text=True)
+
+    stopped = admin.post("/api/admin/view-as/stop")
+    assert stopped.status_code == 200
+    stopped_body = stopped.get_json()
+    assert stopped_body["ok"] is True
+    assert stopped_body["restored_admin_user"]["role"] == "admin"
+
+    with admin.session_transaction() as sess:
+        assert sess.get("impersonator_admin_user_id") is None
+        assert sess.get("impersonation_target_user_id") is None
+        assert sess.get("impersonation_started_at_utc") is None
+
+    admin_back = admin.get("/admin")
+    assert admin_back.status_code == 200
+
+
+def test_non_admin_cannot_start_view_as(tmp_path, monkeypatch):
+    _setup_env(tmp_path, monkeypatch)
+    owner_client = tbm_app.app.test_client()
+    assert _login(owner_client, "owner@example.com", "ownerpass123").status_code == 200
+
+    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+        owner = storage.get_user_by_email(conn, "owner@example.com")
+        owner_id = int(owner["id"])
+
+    denied = owner_client.post(f"/api/admin/view-as/{owner_id}")
+    assert denied.status_code == 403
+
+
+def test_view_as_rejects_non_owner_target(tmp_path, monkeypatch):
+    _setup_env(tmp_path, monkeypatch)
+    admin = tbm_app.app.test_client()
+    assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
+
+    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+        admin_user = storage.get_user_by_email(conn, "admin@example.com")
+        admin_id = int(admin_user["id"])
+
+    bad_target = admin.post(f"/api/admin/view-as/{admin_id}")
+    assert bad_target.status_code == 400
+    assert bad_target.get_json()["code"] == "invalid_owner"
+
+
+def test_view_as_audit_records_start_and_stop(tmp_path, monkeypatch):
+    _setup_env(tmp_path, monkeypatch)
+    admin = tbm_app.app.test_client()
+    assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
+
+    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+        owner = storage.get_user_by_email(conn, "owner@example.com")
+        owner_id = int(owner["id"])
+
+    assert admin.post(f"/api/admin/view-as/{owner_id}").status_code == 200
+    assert admin.post("/api/admin/view-as/stop").status_code == 200
+
+    audit = admin.get("/api/admin/owners/audit?page=1&page_size=50")
+    assert audit.status_code == 200
+    actions = [row["action"] for row in audit.get_json()["items"]]
+    assert "view_as_started" in actions
+    assert "view_as_stopped" in actions
+
+
+def test_view_as_allows_disabled_and_must_reset_owner_with_warning(tmp_path, monkeypatch):
+    _setup_env(tmp_path, monkeypatch)
+    admin = tbm_app.app.test_client()
+    assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
+
+    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+        user = storage.create_user(
+            conn,
+            email="locked@example.com",
+            name="Locked Owner",
+            role="owner",
+            password_hash=hash_password("lockedpass123"),
+        )
+        owner_id = int(user["id"])
+        storage.set_user_flags(conn, owner_id, is_disabled=1, must_reset_password=1)
+
+    started = admin.post(f"/api/admin/view-as/{owner_id}")
+    assert started.status_code == 200
+
+    calendar = admin.get("/calendar")
+    assert calendar.status_code == 200
+    body = calendar.get_data(as_text=True)
+    assert "Viewing as Locked Owner" in body
+    assert "target owner is disabled" in body
+    assert "must-reset-password" in body

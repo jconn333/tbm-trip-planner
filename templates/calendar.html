@@ -194,6 +194,11 @@
   background: color-mix(in srgb, var(--color-surface-soft) 74%, white);
   padding:8px 10px;
 }
+.reservationRoute{display:flex;align-items:flex-start;gap:10px}
+.reservationRouteStop{display:flex;flex-direction:column;min-width:86px}
+.reservationRouteCode{line-height:1.1}
+.reservationRouteLoc{margin-top:4px;color:var(--muted);font-size:12px;line-height:1.2}
+.reservationRouteArrow{color:var(--muted);font-size:16px;line-height:1.1;padding-top:1px}
 .reservationDetailItem.full{ grid-column:1 / -1; }
 .reservationStatus{
   display:inline-flex;
@@ -460,13 +465,28 @@
     const status = escapeHtml(String(reservation.status || '').toUpperCase());
     const owner = escapeHtml(reservation.traveling_owner || 'Unknown');
     const dep = escapeHtml(reservation.dep_icao || '');
+    const depLocation = escapeHtml(reservation.dep_location || '');
     const dest = escapeHtml(reservation.dest_icao || '');
+    const destLocation = escapeHtml(reservation.dest_location || '');
     const parked = escapeHtml(reservation.parked_icao || '');
     const notes = escapeHtml(reservation.notes || '');
     const startDisplay = escapeHtml(formatLocalDisplay(reservation.start));
     const endDisplay = escapeHtml(formatLocalDisplay(reservation.end));
     el.reservationDetailBody.innerHTML = `
-      <div class="reservationDetailItem"><strong>Route</strong><div>${dep} → ${dest}</div></div>
+      <div class="reservationDetailItem">
+        <strong>Route</strong>
+        <div class="reservationRoute">
+          <span class="reservationRouteStop">
+            <span class="reservationRouteCode">${dep}</span>
+            <span class="reservationRouteLoc">${depLocation || '&nbsp;'}</span>
+          </span>
+          <span class="reservationRouteArrow">→</span>
+          <span class="reservationRouteStop">
+            <span class="reservationRouteCode">${dest}</span>
+            <span class="reservationRouteLoc">${destLocation || '&nbsp;'}</span>
+          </span>
+        </div>
+      </div>
       <div class="reservationDetailItem"><strong>Owner</strong><div>${owner}</div></div>
       <div class="reservationDetailItem"><strong>Start</strong><div>${startDisplay}</div></div>
       <div class="reservationDetailItem"><strong>End</strong><div>${endDisplay}</div></div>
@@ -890,7 +910,9 @@
         start: event.startStr,
         end: event.endStr,
         dep_icao: event.extendedProps.dep_icao,
+        dep_location: event.extendedProps.dep_location,
         dest_icao: event.extendedProps.dest_icao,
+        dest_location: event.extendedProps.dest_location,
         parked_icao: event.extendedProps.parked_icao,
         traveling_owner: event.extendedProps.traveling_owner,
         notes: event.extendedProps.notes || '',

@@ -11,12 +11,15 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
 .btn{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--text);border-radius:999px;padding:7px 11px;cursor:pointer;font-size:12px}
 .cardList{display:grid;gap:12px}
 .flightCard{
+  position:relative;
   border:1px solid color-mix(in srgb, var(--color-border) 84%, white);
   border-radius:14px;
   background:color-mix(in srgb, var(--color-surface-soft) 42%, white);
   padding:14px;
   transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease, background-color .16s ease;
+  overflow:visible;
 }
+.flightCard.menu-open{ z-index:18; }
 .flightCard:hover,
 .flightCard:focus-within{
   transform:translateY(-2px);
@@ -32,6 +35,28 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
   font-size:1rem;
   font-weight:650;
   letter-spacing:.01em;
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+}
+.flightRouteStop{
+  display:flex;
+  flex-direction:column;
+  min-width:86px;
+}
+.flightRouteCode{ line-height:1.1; }
+.flightRouteLoc{
+  margin-top:4px;
+  color:var(--muted);
+  font-size:12px;
+  font-weight:500;
+  line-height:1.2;
+}
+.flightRouteArrow{
+  color:var(--muted);
+  font-size:16px;
+  line-height:1.1;
+  padding-top:1px;
 }
 .flightWhen{
   margin:0;
@@ -56,7 +81,39 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
   margin-top:6px;
 }
 .flightMeta{color:var(--muted);font-size:12px;margin-top:8px}
-.flightActions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.flightActions{display:flex;justify-content:flex-end;margin-top:10px}
+.flightActionWrap{position:relative}
+.flightActionTrigger{min-width:108px;justify-content:center}
+.flightActionMenu{
+  position:absolute;
+  right:0;
+  top:calc(100% + 6px);
+  min-width:220px;
+  max-width:260px;
+  border:1px solid color-mix(in srgb, var(--color-border) 88%, white);
+  border-radius:12px;
+  background:var(--color-surface);
+  box-shadow:0 14px 28px rgba(0,0,0,.16);
+  padding:6px;
+  z-index:40;
+}
+.flightActionMenu[hidden]{display:none}
+.flightActionItem{
+  display:block;
+  width:100%;
+  border:0;
+  background:transparent;
+  color:var(--color-text);
+  text-align:left;
+  font-size:13px;
+  font-weight:600;
+  border-radius:8px;
+  padding:9px 10px;
+  cursor:pointer;
+}
+.flightActionItem:hover{background:var(--color-surface-soft)}
+.flightActionItem.danger{color:#8f2f2f}
+.flightActionItem.danger:hover{background:#fff1f1}
 .statusChip{
   display:inline-flex;
   align-items:center;
@@ -254,21 +311,53 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
     };
   }
 
-  function itemActions(item){
+function itemActions(item){
     const buttons = [];
-    buttons.push(`<button class="btn" data-action="edit" data-id="${item.id}">Edit</button>`);
+    buttons.push(`<button class="flightActionItem" data-action="edit" data-id="${item.id}">Edit</button>`);
     if (item.status === 'pending') {
-      buttons.push(`<button class="btn" data-action="approve" data-id="${item.id}">Approve</button>`);
-      buttons.push(`<button class="btn" data-action="deny" data-id="${item.id}">Deny</button>`);
+      buttons.push(`<button class="flightActionItem" data-action="approve" data-id="${item.id}">Approve</button>`);
+      buttons.push(`<button class="flightActionItem danger" data-action="deny" data-id="${item.id}">Deny</button>`);
     }
     if (item.status === 'pending' || item.status === 'approved') {
-      buttons.push(`<button class="btn" data-action="cancel" data-id="${item.id}">Cancel</button>`);
+      buttons.push(`<button class="flightActionItem danger" data-action="cancel" data-id="${item.id}">Cancel</button>`);
     }
     if (item.status === 'denied' || item.status === 'canceled') {
-      buttons.push(`<button class="btn" data-action="reopen" data-id="${item.id}">Reopen</button>`);
+      buttons.push(`<button class="flightActionItem" data-action="reopen" data-id="${item.id}">Reopen</button>`);
     }
-    buttons.push(`<button class="btn" data-action="changes" data-id="${item.id}">View Changes</button>`);
-    return buttons.join(' ');
+    buttons.push(`<button class="flightActionItem" data-action="changes" data-id="${item.id}">View Changes</button>`);
+    return `
+      <div class="flightActionWrap">
+        <button class="btn flightActionTrigger" type="button" data-flight-menu-toggle="${item.id}" aria-haspopup="true" aria-expanded="false">Actions</button>
+        <div class="flightActionMenu" data-flight-menu="${item.id}" hidden>
+          ${buttons.join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  function closeFlightActionMenus(){
+    el.list.querySelectorAll('.flightActionMenu').forEach((menu) => {
+      if(menu instanceof HTMLElement) menu.hidden = true;
+    });
+    el.list.querySelectorAll('[data-flight-menu-toggle]').forEach((btn) => {
+      if(btn instanceof HTMLElement) btn.setAttribute('aria-expanded', 'false');
+    });
+    el.list.querySelectorAll('.flightCard.menu-open').forEach((card) => {
+      if(card instanceof HTMLElement) card.classList.remove('menu-open');
+    });
+  }
+
+  function toggleFlightActionMenu(itemId){
+    const menu = el.list.querySelector(`[data-flight-menu="${itemId}"]`);
+    const trigger = el.list.querySelector(`[data-flight-menu-toggle="${itemId}"]`);
+    if(!(menu instanceof HTMLElement) || !(trigger instanceof HTMLElement)) return;
+    const willOpen = menu.hidden;
+    closeFlightActionMenus();
+    if(!willOpen) return;
+    menu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    const card = trigger.closest('.flightCard');
+    if(card) card.classList.add('menu-open');
   }
 
   async function loadOwners(){
@@ -317,6 +406,13 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
     } catch(_) {}
   }
 
+  function syncFilterSelectUI(){
+    [el.status, el.owner, el.requester].forEach((selectEl) => {
+      if(!(selectEl instanceof HTMLSelectElement)) return;
+      selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
   function formatLocalDateTime(value){
     if(window.TBMReservationUI){ return window.TBMReservationUI.formatLocalIsoDisplay(value); }
     return String(value || '').slice(0,16).replace('T',' ');
@@ -344,7 +440,17 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
         <article class="flightCard">
           <div class="flightCardHead">
             <div class="flightTop">
-              <p class="flightRoute">${item.dep_icao} → ${item.dest_icao}</p>
+              <p class="flightRoute">
+                <span class="flightRouteStop">
+                  <span class="flightRouteCode">${item.dep_icao}</span>
+                  <span class="flightRouteLoc">${item.dep_location || '&nbsp;'}</span>
+                </span>
+                <span class="flightRouteArrow">→</span>
+                <span class="flightRouteStop">
+                  <span class="flightRouteCode">${item.dest_icao}</span>
+                  <span class="flightRouteLoc">${item.dest_location || '&nbsp;'}</span>
+                </span>
+              </p>
               <span class="statusChip ${statusClass(item.status)}">${item.status.toUpperCase()}</span>
             </div>
             <p class="flightWhen">${item.start_display} to ${item.end_display}</p>
@@ -401,7 +507,15 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
       <article class="reviewItem flightCard">
         <div class="flightCardHead">
           <div class="flightTop">
-            <p class="flightRoute">${row.proposed_dep_icao} → ${row.proposed_dest_icao}</p>
+            <p class="flightRoute">
+              <span class="flightRouteStop">
+                <span class="flightRouteCode">${row.proposed_dep_icao}</span>
+              </span>
+              <span class="flightRouteArrow">→</span>
+              <span class="flightRouteStop">
+                <span class="flightRouteCode">${row.proposed_dest_icao}</span>
+              </span>
+            </p>
             <span class="statusChip ${statusClass(row.status)}">${row.status.toUpperCase()}</span>
           </div>
           <p class="flightWhen">${formatLocalDateTime(row.proposed_start)} to ${formatLocalDateTime(row.proposed_end)}</p>
@@ -433,8 +547,18 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
 
     const target = event.target;
     if(!(target instanceof HTMLElement)) return;
-    const action = target.getAttribute('data-action');
-    const id = target.getAttribute('data-id');
+    const toggle = target.closest('[data-flight-menu-toggle]');
+    if(toggle instanceof HTMLElement){
+      const itemId = toggle.getAttribute('data-flight-menu-toggle');
+      if(itemId) toggleFlightActionMenu(itemId);
+      return;
+    }
+
+    const actionButton = target.closest('[data-action][data-id]');
+    if(!(actionButton instanceof HTMLElement)) return;
+    closeFlightActionMenus();
+    const action = actionButton.getAttribute('data-action');
+    const id = actionButton.getAttribute('data-id');
     if(action && id){
       if(action === 'approve') { if(await apiAction('POST', `/api/reservations/${id}/approve`)) loadFlights(); return; }
       if(action === 'deny') { if(await apiAction('POST', `/api/reservations/${id}/deny`, { note: 'Denied by admin.' })) loadFlights(); return; }
@@ -483,9 +607,18 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
   el.apply.addEventListener('click', ()=>{ page = 1; saveFilters(); loadFlights(); });
   el.clear.addEventListener('click', ()=>{
     el.status.value = 'all'; el.owner.value = ''; el.requester.value = ''; el.from.value = ''; el.to.value = ''; el.q.value = ''; page = 1; saveFilters(); loadFlights();
+    syncFilterSelectUI();
   });
   el.prev.addEventListener('click', ()=>{ page = Math.max(1, page-1); loadFlights(); });
   el.next.addEventListener('click', ()=>{ page += 1; loadFlights(); });
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    if(target instanceof Node && el.list.contains(target)) return;
+    closeFlightActionMenus();
+  });
+  document.addEventListener('keydown', (event) => {
+    if(event.key === 'Escape') closeFlightActionMenus();
+  });
 
   setupAirportAutocomplete(el.editDep, el.editDepSuggestions);
   setupAirportAutocomplete(el.editDest, el.editDestSuggestions);
@@ -497,6 +630,7 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
   async function init(){
     await loadOwners();
     restoreFilters();
+    syncFilterSelectUI();
     loadFlights();
   }
 

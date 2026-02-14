@@ -112,6 +112,16 @@ GEOCODE_USER_AGENT = os.getenv("GEOCODE_USER_AGENT", "tbm-trip-planner/1.0 (near
 GEOCODE_SUGGEST_MIN_CHARS = _env_int("GEOCODE_SUGGEST_MIN_CHARS", 3)
 GEOCODE_SUGGEST_LIMIT = _env_int("GEOCODE_SUGGEST_LIMIT", 6)
 GEOCODE_COUNTRY_CODES = os.getenv("GEOCODE_COUNTRY_CODES", "us").strip()
+GOOGLE_MAPS_API_KEY = (os.getenv("GOOGLE_MAPS_API_KEY") or "").strip()
+GEOCODE_PROVIDER_ORDER_RAW = (os.getenv("GEOCODE_PROVIDER_ORDER") or "nominatim,census").strip()
+GEOCODE_GOOGLE_REGION = (os.getenv("GEOCODE_GOOGLE_REGION") or "us").strip().lower()
+GEOCODE_GOOGLE_COMPONENTS = (os.getenv("GEOCODE_GOOGLE_COMPONENTS") or "country:US").strip()
+GEOCODE_ENABLE_CENSUS_FALLBACK = (os.getenv("GEOCODE_ENABLE_CENSUS_FALLBACK") or "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 AIRPORT_META_TIMEOUT_SEC = _env_int("AIRPORT_META_TIMEOUT_SEC", 8)
 AIRPORT_META_CACHE_TTL_SEC = _env_int("AIRPORT_META_CACHE_TTL_SEC", 21600)
 AIRPORT_META_CACHE_MAX_KEYS = _env_int("AIRPORT_META_CACHE_MAX_KEYS", 512)
@@ -141,6 +151,59 @@ OWNER_COLOR_PALETTE = (
     "#FB923C",
     "#86EFAC",
 )
+US_STATE_ABBREVIATIONS = {
+    "ALABAMA": "AL",
+    "ALASKA": "AK",
+    "ARIZONA": "AZ",
+    "ARKANSAS": "AR",
+    "CALIFORNIA": "CA",
+    "COLORADO": "CO",
+    "CONNECTICUT": "CT",
+    "DELAWARE": "DE",
+    "FLORIDA": "FL",
+    "GEORGIA": "GA",
+    "HAWAII": "HI",
+    "IDAHO": "ID",
+    "ILLINOIS": "IL",
+    "INDIANA": "IN",
+    "IOWA": "IA",
+    "KANSAS": "KS",
+    "KENTUCKY": "KY",
+    "LOUISIANA": "LA",
+    "MAINE": "ME",
+    "MARYLAND": "MD",
+    "MASSACHUSETTS": "MA",
+    "MICHIGAN": "MI",
+    "MINNESOTA": "MN",
+    "MISSISSIPPI": "MS",
+    "MISSOURI": "MO",
+    "MONTANA": "MT",
+    "NEBRASKA": "NE",
+    "NEVADA": "NV",
+    "NEW HAMPSHIRE": "NH",
+    "NEW JERSEY": "NJ",
+    "NEW MEXICO": "NM",
+    "NEW YORK": "NY",
+    "NORTH CAROLINA": "NC",
+    "NORTH DAKOTA": "ND",
+    "OHIO": "OH",
+    "OKLAHOMA": "OK",
+    "OREGON": "OR",
+    "PENNSYLVANIA": "PA",
+    "RHODE ISLAND": "RI",
+    "SOUTH CAROLINA": "SC",
+    "SOUTH DAKOTA": "SD",
+    "TENNESSEE": "TN",
+    "TEXAS": "TX",
+    "UTAH": "UT",
+    "VERMONT": "VT",
+    "VIRGINIA": "VA",
+    "WASHINGTON": "WA",
+    "WEST VIRGINIA": "WV",
+    "WISCONSIN": "WI",
+    "WYOMING": "WY",
+    "DISTRICT OF COLUMBIA": "DC",
+}
 
 AIRPORTS = airportsdata.load("ICAO")
 LID_TO_ICAOS: dict[str, list[str]] = {}
@@ -484,6 +547,42 @@ def _account_view_context(*, row, form_error: str | None = None, form_success: s
     }
 
 
+def _is_impersonation_active() -> bool:
+    return (
+        bool(session.get("impersonator_admin_user_id"))
+        and bool(session.get("impersonation_target_user_id"))
+        and bool(session.get("impersonation_started_at_utc"))
+    )
+
+
+def _impersonation_session_payload() -> dict | None:
+    if not _is_impersonation_active():
+        return None
+    try:
+        return {
+            "impersonator_admin_user_id": int(session.get("impersonator_admin_user_id")),
+            "impersonation_target_user_id": int(session.get("impersonation_target_user_id")),
+            "impersonation_started_at_utc": str(session.get("impersonation_started_at_utc") or ""),
+        }
+    except Exception:
+        return None
+
+
+def _clear_impersonation_session() -> None:
+    session.pop("impersonator_admin_user_id", None)
+    session.pop("impersonation_target_user_id", None)
+    session.pop("impersonation_started_at_utc", None)
+
+
+def _start_impersonation_session(admin_user_id: int, target_owner_user_id: int) -> str:
+    started_at_utc = _utc_now().isoformat()
+    session["impersonator_admin_user_id"] = int(admin_user_id)
+    session["impersonation_target_user_id"] = int(target_owner_user_id)
+    session["impersonation_started_at_utc"] = started_at_utc
+    session["user_id"] = int(target_owner_user_id)
+    return started_at_utc
+
+
 def _can_edit_reservation(user, reservation) -> bool:
     if not user or not reservation:
         return False
@@ -522,6 +621,8 @@ def _reservation_to_event_payload(row, user) -> dict:
     title = f"{row['traveling_owner_name']} — {row['dep_icao']} → {row['dest_icao']} (Parked: {row['parked_icao']})"
     status = row["status"]
     color = _effective_pending_reservation_color() if status == "pending" else _effective_owner_color(int(row["traveling_user_id"]))
+    dep_icao = row["dep_icao"]
+    dest_icao = row["dest_icao"]
     return {
         "id": int(row["id"]),
         "title": title,
@@ -529,8 +630,10 @@ def _reservation_to_event_payload(row, user) -> dict:
         "end": _utc_iso_to_local_iso(row["end_utc"]),
         "status": status,
         "display_color": color,
-        "dep_icao": row["dep_icao"],
-        "dest_icao": row["dest_icao"],
+        "dep_icao": dep_icao,
+        "dest_icao": dest_icao,
+        "dep_location": _airport_location_label(dep_icao),
+        "dest_location": _airport_location_label(dest_icao),
         "parked_icao": row["parked_icao"],
         "traveling_owner": row["traveling_owner_name"],
         "notes": row["notes"] or "",
@@ -540,6 +643,8 @@ def _reservation_to_event_payload(row, user) -> dict:
 
 
 def _reservation_payload(row) -> dict:
+    dep_icao = row["dep_icao"]
+    dest_icao = row["dest_icao"]
     return {
         "id": int(row["id"]),
         "status": row["status"],
@@ -547,8 +652,10 @@ def _reservation_payload(row) -> dict:
         "end": _utc_iso_to_local_iso(row["end_utc"]),
         "start_display": _utc_iso_to_local_display(row["start_utc"]),
         "end_display": _utc_iso_to_local_display(row["end_utc"]),
-        "dep_icao": row["dep_icao"],
-        "dest_icao": row["dest_icao"],
+        "dep_icao": dep_icao,
+        "dest_icao": dest_icao,
+        "dep_location": _airport_location_label(dep_icao),
+        "dest_location": _airport_location_label(dest_icao),
         "parked_icao": row["parked_icao"],
         "traveling_owner": row["traveling_owner_name"],
         "requested_by": row["requested_by_name"],
@@ -898,20 +1005,41 @@ def load_current_user():
     g.request_started_at = time.time()
     g.request_id = request.headers.get("X-Request-Id") or uuid.uuid4().hex
     g.current_user = None
+    g.impersonator_admin_user = None
+    g.impersonation_meta = None
     user_id = session.get("user_id")
     if not user_id:
+        _clear_impersonation_session()
         return
     try:
         uid = int(user_id)
     except Exception:
         session.pop("user_id", None)
+        _clear_impersonation_session()
         return
     with _db_conn() as conn:
         row = storage.get_user_by_id(conn, uid)
+        impersonation = _impersonation_session_payload()
+        if impersonation:
+            admin_row = storage.get_user_by_id(conn, int(impersonation["impersonator_admin_user_id"]))
+            if not admin_row or admin_row["role"] != "admin":
+                _clear_impersonation_session()
+            else:
+                g.impersonator_admin_user = _serialize_user(admin_row)
     if not row:
         session.pop("user_id", None)
+        _clear_impersonation_session()
         return
     g.current_user = _serialize_user(row)
+    if _is_impersonation_active() and g.impersonator_admin_user:
+        g.impersonation_meta = {
+            "target_user_id": int(g.current_user["id"]),
+            "started_at_utc": str(session.get("impersonation_started_at_utc") or ""),
+            "warnings": {
+                "is_disabled": bool(g.current_user.get("is_disabled")),
+                "must_reset_password": bool(g.current_user.get("must_reset_password")),
+            },
+        }
 
 
 @app.before_request
@@ -956,6 +1084,8 @@ def enforce_owner_enabled():
     user = getattr(g, "current_user", None)
     if not user or user.get("role") != "owner":
         return None
+    if _is_impersonation_active():
+        return None
     if not user.get("is_disabled"):
         return None
     if request.path in {"/logout", "/api/logout"}:
@@ -970,6 +1100,8 @@ def enforce_owner_enabled():
 def enforce_owner_password_reset():
     user = getattr(g, "current_user", None)
     if not user or user.get("role") != "owner":
+        return None
+    if _is_impersonation_active():
         return None
     if not user.get("must_reset_password"):
         return None
@@ -1026,11 +1158,17 @@ def handle_unexpected_error(exc):
 
 @app.context_processor
 def inject_template_globals():
+    impersonation_meta = getattr(g, "impersonation_meta", None) or {}
+    started_at = impersonation_meta.get("started_at_utc")
     return {
         "current_user": getattr(g, "current_user", None),
         "home_timezone": _effective_home_timezone_name(),
         "csrf_token": _get_or_create_csrf_token(),
         "format_date_display": _format_date_display,
+        "impersonation_active": _is_impersonation_active() and bool(getattr(g, "impersonator_admin_user", None)),
+        "impersonation_target": getattr(g, "current_user", None) if _is_impersonation_active() else None,
+        "impersonation_started_at": _utc_iso_to_local_display(started_at) if started_at else None,
+        "impersonation_warning_flags": impersonation_meta.get("warnings", {"is_disabled": False, "must_reset_password": False}),
     }
 
 
@@ -1066,8 +1204,10 @@ def _log_owner_audit(
     owner_user_id: int,
     action: str,
     metadata: dict | None = None,
+    actor_user_id: int | None = None,
 ):
-    actor_user_id = int(g.current_user["id"]) if getattr(g, "current_user", None) else None
+    if actor_user_id is None:
+        actor_user_id = int(g.current_user["id"]) if getattr(g, "current_user", None) else None
     storage.create_owner_audit_event(
         conn,
         owner_user_id=int(owner_user_id),
@@ -1328,6 +1468,37 @@ def get_airport_by_icao(icao: str) -> dict:
     return airport_to_choice(icao, a)
 
 
+def _airport_location_label(icao: str | None) -> str:
+    code = (icao or "").strip().upper()
+    if not code:
+        return ""
+    airport = AIRPORTS.get(code)
+    if not airport:
+        return ""
+    city = (airport.get("city") or "").strip()
+    country = (airport.get("country") or "").strip().upper()
+    region_raw = (airport.get("region") or airport.get("subd") or "").strip()
+    region = region_raw.upper()
+    state = ""
+    if region.startswith("US-") and len(region) > 3:
+        state = region.split("-", 1)[1].strip()
+    elif country == "US" and region_raw:
+        normalized = region_raw.strip()
+        if len(normalized) == 2:
+            state = normalized.upper()
+        else:
+            state = US_STATE_ABBREVIATIONS.get(normalized.upper(), normalized)
+    if city and state:
+        return f"{city}, {state}"
+    if city and country and country != "US":
+        return f"{city}, {country}"
+    if city:
+        return city
+    if state:
+        return state
+    return country
+
+
 
 def find_airports(query: str, limit: int = 12) -> list[dict]:
     q = (query or "").strip()
@@ -1371,28 +1542,63 @@ def find_airports(query: str, limit: int = 12) -> list[dict]:
     return found[:limit]
 
 
+def _geocode_provider_order() -> list[str]:
+    allowed = {"google", "nominatim", "census"}
+    parsed: list[str] = []
+    for raw in GEOCODE_PROVIDER_ORDER_RAW.split(","):
+        key = (raw or "").strip().lower()
+        if not key or key not in allowed:
+            continue
+        if key == "google" and not GOOGLE_MAPS_API_KEY:
+            continue
+        if key == "census" and not GEOCODE_ENABLE_CENSUS_FALLBACK:
+            continue
+        if key in parsed:
+            continue
+        parsed.append(key)
+    return parsed or ["nominatim"] + (["census"] if GEOCODE_ENABLE_CENSUS_FALLBACK else [])
+
+
+def _cache_geocode_key(query: str) -> str:
+    provider_stamp = ",".join(_geocode_provider_order())
+    google_on = "1" if GOOGLE_MAPS_API_KEY else "0"
+    return f"{query.lower()}::{provider_stamp}::g={google_on}"
+
+
 def geocode_address(address: str) -> dict | None:
     q = (address or "").strip()
     if not q:
         return None
 
     now = time.time()
-    cache_key = q.lower()
+    cache_key = _cache_geocode_key(q)
     with _GEOCODE_CACHE_LOCK:
         cached = _GEOCODE_CACHE.get(cache_key)
         if cached and (now - cached[0]) <= GEOCODE_CACHE_TTL_SEC:
             return cached[1]
 
     result = None
-    for candidate in _location_query_candidates(q):
-        body = _nominatim_search(candidate, limit=1)
-        if body is None:
-            return None
-        if not isinstance(body, list) or not body:
+    for provider in _geocode_provider_order():
+        if provider == "google":
+            parsed, confident = _google_geocode_address(q)
+            if parsed:
+                result = parsed
+                if confident:
+                    break
             continue
-        result = _nominatim_item_to_geocode(body[0], q)
-        if result:
-            break
+        if provider == "nominatim":
+            parsed, confident = _nominatim_geocode_address(q)
+            if parsed:
+                result = parsed
+                if confident:
+                    break
+            continue
+        if provider == "census":
+            parsed = _census_geocode_address(q)
+            if parsed:
+                result = parsed
+                break
+
     if not result:
         return None
 
@@ -1416,6 +1622,42 @@ def _location_query_candidates(query: str) -> list[str]:
 
     candidates: list[str] = [q]
 
+    # Try to normalize common US full-address input entered without commas.
+    full_addr = re.match(r"^(\d{1,8})\s+(.+?)\s+([A-Za-z .'-]+)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$", q)
+    if full_addr:
+        house_no = full_addr.group(1).strip()
+        street = full_addr.group(2).strip()
+        city = full_addr.group(3).strip(" ,")
+        st = full_addr.group(4).upper()
+        zip_code = full_addr.group(5).strip()
+        base = f"{house_no} {street}, {city}, {st} {zip_code}"
+        if base not in candidates:
+            candidates.append(base)
+        base_us = f"{base}, USA"
+        if base_us not in candidates:
+            candidates.append(base_us)
+        city_state = f"{house_no} {street}, {city}, {st}"
+        if city_state not in candidates:
+            candidates.append(city_state)
+        city_state_us = f"{city_state}, USA"
+        if city_state_us not in candidates:
+            candidates.append(city_state_us)
+
+        # State route aliases improve OSM hit rate for addresses like "State Route 39".
+        route_variants = [street]
+        route_variants.append(re.sub(r"\bState\s+Route\b", "SR", street, flags=re.IGNORECASE))
+        route_variants.append(re.sub(r"\bState\s+Rte\b", "SR", street, flags=re.IGNORECASE))
+        for variant in route_variants:
+            normalized_variant = " ".join(variant.split()).strip()
+            if not normalized_variant:
+                continue
+            route_q = f"{house_no} {normalized_variant}, {city}, {st} {zip_code}"
+            if route_q not in candidates:
+                candidates.append(route_q)
+            route_q_us = f"{route_q}, USA"
+            if route_q_us not in candidates:
+                candidates.append(route_q_us)
+
     city_state_match = re.match(r"^([A-Za-z .'-]+),?\s+([A-Za-z]{2})$", q)
     if city_state_match:
         city = city_state_match.group(1).strip(" ,")
@@ -1435,12 +1677,69 @@ def _location_query_candidates(query: str) -> list[str]:
     return candidates
 
 
+def _looks_like_us_street_query(query: str) -> bool:
+    q = " ".join((query or "").strip().split()).upper()
+    if not q:
+        return False
+    has_number = any(ch.isdigit() for ch in q)
+    has_state_zip = bool(re.search(r"\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b", q))
+    has_us_route_words = any(token in q for token in ("STATE ROUTE", " SR ", " HIGHWAY ", " HWY ", " ST ", " AVE ", " RD "))
+    return has_number and (has_state_zip or has_us_route_words)
+
+
+def _has_locality_hint_for_street_query(query: str) -> bool:
+    q = " ".join((query or "").strip().split())
+    if not q:
+        return False
+    upper = q.upper()
+    if "," in upper:
+        return True
+    if re.search(r"\b\d{5}(?:-\d{4})?\b", upper):
+        return True
+    state_codes = set(US_STATE_ABBREVIATIONS.values())
+    word_tokens = re.findall(r"[A-Z]+", upper)
+    if any(tok in state_codes for tok in word_tokens if len(tok) == 2):
+        return True
+    if any(state_name in upper for state_name in US_STATE_ABBREVIATIONS.keys()):
+        return True
+    return False
+
+
+def _nominatim_geocode_address(query: str) -> tuple[dict | None, bool]:
+    result = None
+    result_item = None
+    result_score = float("-inf")
+    for candidate in _location_query_candidates(query):
+        body = _nominatim_search(candidate, limit=6)
+        if body is None:
+            return None, False
+        if not isinstance(body, list) or not body:
+            continue
+        best = _pick_best_nominatim_item(candidate, body)
+        if not best:
+            continue
+        score = _nominatim_candidate_score(candidate, best)
+        parsed = _nominatim_item_to_geocode(best, query)
+        if not parsed:
+            continue
+        if score > result_score:
+            result_score = score
+            result = parsed
+            result_item = best
+        if _nominatim_is_confident_match(candidate, best, score):
+            return parsed, True
+    if not result:
+        return None, False
+    confident = bool(result_item and _nominatim_is_confident_match(query, result_item, result_score))
+    return result, confident
+
+
 def _nominatim_search(query: str, limit: int = 1) -> list[dict] | None:
     params = {
         "q": query,
         "format": "jsonv2",
         "limit": str(max(1, min(limit, 10))),
-        "addressdetails": "0",
+        "addressdetails": "1",
     }
     if GEOCODE_COUNTRY_CODES:
         params["countrycodes"] = GEOCODE_COUNTRY_CODES
@@ -1461,6 +1760,181 @@ def _nominatim_search(query: str, limit: int = 1) -> list[dict] | None:
         return None
 
 
+def _google_geocode_search(query: str) -> dict | None:
+    if not GOOGLE_MAPS_API_KEY:
+        return None
+    params = {
+        "address": query,
+        "key": GOOGLE_MAPS_API_KEY,
+    }
+    if GEOCODE_GOOGLE_REGION:
+        params["region"] = GEOCODE_GOOGLE_REGION
+    if GEOCODE_GOOGLE_COMPONENTS:
+        params["components"] = GEOCODE_GOOGLE_COMPONENTS
+    url = "https://maps.googleapis.com/maps/api/geocode/json?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"User-Agent": GEOCODE_USER_AGENT})
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    started = time.perf_counter()
+    try:
+        with urllib.request.urlopen(req, timeout=GEOCODE_TIMEOUT_SEC, context=ctx) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        status = str(body.get("status") or "")
+        logger.info("google_geocode_ok latency_ms=%.1f status=%s query=%s", elapsed_ms, status, query[:120])
+        return body if isinstance(body, dict) else None
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        logger.exception("google_geocode_failed latency_ms=%.1f query=%s", elapsed_ms, query[:120])
+        return None
+
+
+def _google_places_autocomplete_search(query: str, limit: int) -> dict | None:
+    if not GOOGLE_MAPS_API_KEY:
+        return None
+    params = {
+        "input": query,
+        "key": GOOGLE_MAPS_API_KEY,
+        "types": "address",
+        "components": GEOCODE_GOOGLE_COMPONENTS or "country:US",
+    }
+    if GEOCODE_GOOGLE_REGION:
+        params["region"] = GEOCODE_GOOGLE_REGION
+    url = "https://maps.googleapis.com/maps/api/place/autocomplete/json?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"User-Agent": GEOCODE_USER_AGENT})
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    started = time.perf_counter()
+    try:
+        with urllib.request.urlopen(req, timeout=GEOCODE_TIMEOUT_SEC, context=ctx) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        status = str(body.get("status") or "")
+        logger.info("google_places_ok latency_ms=%.1f status=%s limit=%s query=%s", elapsed_ms, status, limit, query[:120])
+        return body if isinstance(body, dict) else None
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        logger.exception("google_places_failed latency_ms=%.1f limit=%s query=%s", elapsed_ms, limit, query[:120])
+        return None
+
+
+def _google_place_details_search(place_id: str) -> dict | None:
+    if not GOOGLE_MAPS_API_KEY:
+        return None
+    params = {
+        "place_id": place_id,
+        "fields": "formatted_address,geometry/location",
+        "key": GOOGLE_MAPS_API_KEY,
+    }
+    url = "https://maps.googleapis.com/maps/api/place/details/json?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"User-Agent": GEOCODE_USER_AGENT})
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    started = time.perf_counter()
+    try:
+        with urllib.request.urlopen(req, timeout=GEOCODE_TIMEOUT_SEC, context=ctx) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        status = str(body.get("status") or "")
+        logger.info("google_place_details_ok latency_ms=%.1f status=%s place_id=%s", elapsed_ms, status, place_id[:40])
+        return body if isinstance(body, dict) else None
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        logger.exception("google_place_details_failed latency_ms=%.1f place_id=%s", elapsed_ms, place_id[:40])
+        return None
+
+
+def _census_geocode_search(query: str) -> list[dict] | None:
+    params = {
+        "address": query,
+        "benchmark": "Public_AR_Current",
+        "format": "json",
+    }
+    url = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"User-Agent": GEOCODE_USER_AGENT})
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    started = time.perf_counter()
+    try:
+        with urllib.request.urlopen(req, timeout=GEOCODE_TIMEOUT_SEC, context=ctx) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        logger.info("census_geocode_ok latency_ms=%.1f query=%s", elapsed_ms, query[:120])
+        result = body.get("result") if isinstance(body, dict) else None
+        matches = result.get("addressMatches") if isinstance(result, dict) else None
+        return matches if isinstance(matches, list) else []
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        logger.exception("census_geocode_failed latency_ms=%.1f query=%s", elapsed_ms, query[:120])
+        return None
+
+
+def _nominatim_candidate_score(query: str, item: dict) -> float:
+    q = (query or "").strip().lower()
+    name = str(item.get("display_name") or "").lower()
+    address = item.get("address") if isinstance(item.get("address"), dict) else {}
+    item_class = str(item.get("class") or "").lower()
+    item_type = str(item.get("type") or "").lower()
+
+    score = 0.0
+    try:
+        score += float(item.get("importance") or 0.0) * 100.0
+    except Exception:
+        pass
+
+    has_digits_in_query = any(ch.isdigit() for ch in q)
+    house_number = str(address.get("house_number") or "").strip().lower()
+    road = str(address.get("road") or "").strip().lower()
+    city = str(address.get("city") or address.get("town") or address.get("village") or "").strip().lower()
+    state = str(address.get("state") or "").strip().lower()
+    postcode = str(address.get("postcode") or "").strip().lower()
+
+    if has_digits_in_query:
+        if house_number and house_number in q:
+            score += 55.0
+        elif house_number and house_number in name:
+            score += 30.0
+        if item_type in {"house", "residential", "building", "apartments"}:
+            score += 20.0
+        if item_class in {"building", "place"}:
+            score += 8.0
+
+    if road and road in q:
+        score += 18.0
+    if city and city in q:
+        score += 12.0
+    if state and state in q:
+        score += 8.0
+    if postcode and postcode in q:
+        score += 10.0
+
+    if item_type in {"administrative", "county"}:
+        score -= 22.0
+    if "county" in name:
+        score -= 12.0
+
+    return score
+
+
+def _nominatim_is_confident_match(query: str, item: dict, score: float) -> bool:
+    q = (query or "").strip().lower()
+    if not q:
+        return False
+    has_digits = any(ch.isdigit() for ch in q)
+    if not has_digits:
+        return score >= 35.0
+
+    address = item.get("address") if isinstance(item.get("address"), dict) else {}
+    house_number = str(address.get("house_number") or "").strip().lower()
+    postcode = str(address.get("postcode") or "").strip().lower()
+    has_house = bool(house_number and house_number in q)
+    has_zip = bool(postcode and postcode in q)
+    return has_house and (has_zip or score >= 60.0)
+
+
+def _pick_best_nominatim_item(query: str, items: list[dict]) -> dict | None:
+    if not isinstance(items, list) or not items:
+        return None
+    ranked = sorted(items, key=lambda item: _nominatim_candidate_score(query, item), reverse=True)
+    return ranked[0] if ranked else None
+
+
 def _nominatim_item_to_geocode(item: dict, query: str) -> dict | None:
     lat = item.get("lat")
     lon = item.get("lon")
@@ -1476,6 +1950,161 @@ def _nominatim_item_to_geocode(item: dict, query: str) -> dict | None:
         }
     except Exception:
         return None
+
+
+def _google_has_street_number(item: dict) -> bool:
+    if not isinstance(item, dict):
+        return False
+    components = item.get("address_components")
+    if not isinstance(components, list):
+        return False
+    for comp in components:
+        if not isinstance(comp, dict):
+            continue
+        types = comp.get("types")
+        if isinstance(types, list) and "street_number" in types:
+            return True
+    return False
+
+
+def _google_result_to_geocode(item: dict, query: str) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    geometry = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
+    location = geometry.get("location") if isinstance(geometry.get("location"), dict) else {}
+    lat = location.get("lat")
+    lon = location.get("lng")
+    if lat is None or lon is None:
+        return None
+    formatted = (item.get("formatted_address") or "").strip() or query
+    try:
+        return {
+            "query": query,
+            "display_name": formatted,
+            "lat": float(lat),
+            "lon": float(lon),
+        }
+    except Exception:
+        return None
+
+
+def _google_is_confident_match(query: str, item: dict) -> bool:
+    q = (query or "").strip()
+    if not q:
+        return False
+    has_digits = any(ch.isdigit() for ch in q)
+    geometry = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
+    location_type = str(geometry.get("location_type") or "").upper()
+    types = item.get("types") if isinstance(item.get("types"), list) else []
+    has_rooftop = location_type in {"ROOFTOP", "RANGE_INTERPOLATED"}
+    if not has_digits:
+        return has_rooftop or bool(types)
+    return _google_has_street_number(item) and (has_rooftop or any(t in types for t in ("street_address", "premise", "subpremise")))
+
+
+def _google_geocode_address(query: str) -> tuple[dict | None, bool]:
+    body = _google_geocode_search(query)
+    if not isinstance(body, dict):
+        return None, False
+    status = str(body.get("status") or "").upper()
+    if status not in {"OK", "ZERO_RESULTS"}:
+        return None, False
+    results = body.get("results") if isinstance(body.get("results"), list) else []
+    if not results:
+        return None, False
+    best = results[0]
+    parsed = _google_result_to_geocode(best, query)
+    if not parsed:
+        return None, False
+    return parsed, _google_is_confident_match(query, best)
+
+
+def _google_places_autocomplete(query: str, limit: int) -> list[dict]:
+    body = _google_places_autocomplete_search(query, limit)
+    if not isinstance(body, dict):
+        return []
+    status = str(body.get("status") or "").upper()
+    if status not in {"OK", "ZERO_RESULTS"}:
+        return []
+    predictions = body.get("predictions") if isinstance(body.get("predictions"), list) else []
+    out: list[dict] = []
+    seen = set()
+    for pred in predictions:
+        if not isinstance(pred, dict):
+            continue
+        description = _compact_address_suggestion_label(str(pred.get("description") or "").strip())
+        place_id = str(pred.get("place_id") or "").strip()
+        if not description or not place_id:
+            continue
+        key = f"{description.lower()}::{place_id}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"display_name": description, "place_id": place_id})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _google_place_details_geocode(place_id: str, query: str | None = None) -> dict | None:
+    pid = (place_id or "").strip()
+    if not pid:
+        return None
+    body = _google_place_details_search(pid)
+    if not isinstance(body, dict):
+        return None
+    status = str(body.get("status") or "").upper()
+    if status != "OK":
+        return None
+    result = body.get("result") if isinstance(body.get("result"), dict) else {}
+    geometry = result.get("geometry") if isinstance(result.get("geometry"), dict) else {}
+    location = geometry.get("location") if isinstance(geometry.get("location"), dict) else {}
+    lat = location.get("lat")
+    lon = location.get("lng")
+    if lat is None or lon is None:
+        return None
+    display_name = (result.get("formatted_address") or "").strip() or (query or pid)
+    try:
+        return {
+            "query": query or pid,
+            "display_name": display_name,
+            "lat": float(lat),
+            "lon": float(lon),
+            "place_id": pid,
+        }
+    except Exception:
+        return None
+
+
+def _census_match_to_geocode(item: dict, query: str) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    coords = item.get("coordinates") if isinstance(item.get("coordinates"), dict) else {}
+    lat = coords.get("y")
+    lon = coords.get("x")
+    if lat is None or lon is None:
+        return None
+    matched = (item.get("matchedAddress") or "").strip() or query
+    try:
+        return {
+            "query": query,
+            "display_name": matched,
+            "lat": float(lat),
+            "lon": float(lon),
+        }
+    except Exception:
+        return None
+
+
+def _census_geocode_address(query: str) -> dict | None:
+    matches = _census_geocode_search(query)
+    if not isinstance(matches, list) or not matches:
+        return None
+    for item in matches:
+        parsed = _census_match_to_geocode(item, query)
+        if parsed:
+            return parsed
+    return None
 
 
 def _compact_address_suggestion_label(display_name: str) -> str:
@@ -1524,19 +2153,95 @@ def suggest_addresses(query: str, limit: int | None = None) -> list[dict]:
 
     limit_n = GEOCODE_SUGGEST_LIMIT if limit is None else max(1, min(int(limit), 10))
     now = time.time()
-    cache_key = f"{q.lower()}::{limit_n}"
+    provider_stamp = ",".join(_geocode_provider_order())
+    cache_key = f"{q.lower()}::{limit_n}::{provider_stamp}"
     with _GEOCODE_SUGGEST_CACHE_LOCK:
         cached = _GEOCODE_SUGGEST_CACHE.get(cache_key)
         if cached and (now - cached[0]) <= GEOCODE_CACHE_TTL_SEC:
             return cached[1]
 
-    body = _nominatim_search(q, limit=limit_n)
-    if not isinstance(body, list):
-        return []
-
     out: list[dict] = []
     seen = set()
-    for item in body:
+    provider_order = _geocode_provider_order()
+    if "google" in provider_order:
+        for item in _google_places_autocomplete(q, limit_n):
+            label = str(item.get("display_name") or "").strip()
+            place_id = str(item.get("place_id") or "").strip()
+            if not label or not place_id:
+                continue
+            key = f"{label.lower()}::{place_id}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"display_name": label, "place_id": place_id})
+        if out:
+            with _GEOCODE_SUGGEST_CACHE_LOCK:
+                for key in list(_GEOCODE_SUGGEST_CACHE.keys()):
+                    if (now - _GEOCODE_SUGGEST_CACHE[key][0]) > GEOCODE_CACHE_TTL_SEC:
+                        _GEOCODE_SUGGEST_CACHE.pop(key, None)
+                _GEOCODE_SUGGEST_CACHE[cache_key] = (now, out)
+                if len(_GEOCODE_SUGGEST_CACHE) > GEOCODE_CACHE_MAX_KEYS:
+                    oldest_key = min(_GEOCODE_SUGGEST_CACHE.keys(), key=lambda k: _GEOCODE_SUGGEST_CACHE[k][0])
+                    _GEOCODE_SUGGEST_CACHE.pop(oldest_key, None)
+            return out
+
+    if _looks_like_us_street_query(q) and not _has_locality_hint_for_street_query(q):
+        return []
+
+    body_all: list[dict] = []
+    seen_raw = set()
+    if "nominatim" in provider_order:
+        for candidate in _location_query_candidates(q):
+            body = _nominatim_search(candidate, limit=limit_n)
+            if not isinstance(body, list):
+                continue
+            for item in body:
+                key = str(item.get("display_name") or "")
+                if key in seen_raw:
+                    continue
+                seen_raw.add(key)
+                body_all.append(item)
+            if len(body_all) >= (limit_n * 3):
+                break
+    if not body_all and "census" in provider_order and _looks_like_us_street_query(q):
+        matches = _census_geocode_search(q)
+        for item in matches or []:
+            parsed = _census_match_to_geocode(item, q)
+            if not parsed:
+                continue
+            label = _compact_address_suggestion_label(parsed["display_name"])
+            key = label.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"display_name": label, "lat": parsed["lat"], "lon": parsed["lon"]})
+            if len(out) >= limit_n:
+                break
+        return out
+    if not body_all:
+        return out
+
+    ranked_body = sorted(body_all, key=lambda item: _nominatim_candidate_score(q, item), reverse=True)
+    prefer_census_first = False
+    if "census" in provider_order and _looks_like_us_street_query(q):
+        top_item = ranked_body[0] if ranked_body else None
+        top_score = _nominatim_candidate_score(q, top_item) if top_item else float("-inf")
+        prefer_census_first = not bool(top_item and _nominatim_is_confident_match(q, top_item, top_score))
+
+    if prefer_census_first:
+        for item in _census_geocode_search(q) or []:
+            parsed = _census_match_to_geocode(item, q)
+            if not parsed:
+                continue
+            label = _compact_address_suggestion_label(parsed["display_name"])
+            key = label.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"display_name": label, "lat": parsed["lat"], "lon": parsed["lon"]})
+            break
+
+    for item in ranked_body:
         parsed = _nominatim_item_to_geocode(item, q)
         if not parsed:
             continue
@@ -2669,6 +3374,107 @@ def api_owner_force_password_reset(user_id: int):
     return jsonify({"ok": True})
 
 
+@app.post("/api/admin/view-as/<int:owner_user_id>")
+@admin_required
+def api_admin_start_view_as(owner_user_id: int):
+    current_admin = g.current_user
+    current_impersonation = _impersonation_session_payload()
+    if current_impersonation:
+        if int(current_impersonation["impersonation_target_user_id"]) == int(owner_user_id):
+            return jsonify(
+                {
+                    "ok": True,
+                    "acting_as_user": g.current_user,
+                    "impersonation": {
+                        "started_at": _utc_iso_to_local_iso(str(current_impersonation["impersonation_started_at_utc"])),
+                        "target_user_id": int(owner_user_id),
+                    },
+                }
+            )
+        return _json_error("Stop current impersonation before starting another.", 409, "impersonation_active")
+
+    with _db_conn() as conn:
+        target = storage.get_user_by_id(conn, owner_user_id)
+        if not target:
+            return _json_error("Owner not found.", 404, "not_found")
+        if target["role"] != "owner":
+            return _json_error("Only owners can be impersonated.", 400, "invalid_owner")
+        started_at_utc = _start_impersonation_session(int(current_admin["id"]), int(owner_user_id))
+        _log_owner_audit(
+            conn,
+            owner_user_id=int(owner_user_id),
+            action="view_as_started",
+            actor_user_id=int(current_admin["id"]),
+            metadata={
+                "source": "admin_owner_actions",
+                "impersonator_admin_user_id": int(current_admin["id"]),
+                "target_owner_user_id": int(owner_user_id),
+                "target_owner_email": target["email"],
+                "target_owner_flags": {
+                    "is_disabled": int(target["is_disabled"]) == 1 if "is_disabled" in target.keys() else False,
+                    "must_reset_password": int(target["must_reset_password"]) == 1 if "must_reset_password" in target.keys() else False,
+                },
+                "started_at_utc": started_at_utc,
+            },
+        )
+
+    logger.info("impersonation_started admin_id=%s target_id=%s", int(current_admin["id"]), int(owner_user_id))
+    return jsonify(
+        {
+            "ok": True,
+            "acting_as_user": _serialize_user(target),
+            "impersonation": {
+                "started_at": _utc_iso_to_local_iso(started_at_utc),
+                "target_user_id": int(owner_user_id),
+            },
+        }
+    )
+
+
+@app.post("/api/admin/view-as/stop")
+@login_required
+def api_admin_stop_view_as():
+    impersonation = _impersonation_session_payload()
+    impersonated_owner = g.current_user
+    if not impersonation:
+        return _json_error("No active impersonation session.", 400, "impersonation_inactive")
+
+    admin_id = int(impersonation["impersonator_admin_user_id"])
+    owner_id = int(impersonation["impersonation_target_user_id"])
+    started_at_utc = str(impersonation["impersonation_started_at_utc"])
+
+    with _db_conn() as conn:
+        admin_row = storage.get_user_by_id(conn, admin_id)
+        if not admin_row or admin_row["role"] != "admin":
+            _clear_impersonation_session()
+            session.pop("user_id", None)
+            return _json_error("Original admin account is unavailable.", 409, "impersonation_restore_failed")
+
+        _log_owner_audit(
+            conn,
+            owner_user_id=owner_id,
+            action="view_as_stopped",
+            actor_user_id=admin_id,
+            metadata={
+                "source": "admin_owner_actions",
+                "impersonator_admin_user_id": admin_id,
+                "target_owner_user_id": owner_id,
+                "target_owner_email": impersonated_owner.get("email") if isinstance(impersonated_owner, dict) else None,
+                "started_at_utc": started_at_utc,
+                "stopped_at_utc": _utc_now().isoformat(),
+            },
+        )
+
+    _clear_impersonation_session()
+    session["user_id"] = admin_id
+    restored_admin_user = _serialize_user(admin_row)
+    g.current_user = restored_admin_user
+    g.impersonator_admin_user = None
+    g.impersonation_meta = None
+    logger.info("impersonation_stopped admin_id=%s target_id=%s", admin_id, owner_id)
+    return jsonify({"ok": True, "restored_admin_user": restored_admin_user})
+
+
 @app.get("/api/admin/owners/audit")
 @admin_required
 def api_admin_owner_audit():
@@ -2985,12 +3791,37 @@ def api_nearest_airports():
         return _json_error(err["message"], err["status"], err["code"], err.get("field"))
 
     address = (request.args.get("address") or "").strip()
-    if len(address) < 3:
-        return _json_error("address must be at least 3 characters.", 400, "invalid_address", "address")
+    place_id = (request.args.get("place_id") or "").strip()
+    lat_raw = (request.args.get("lat") or "").strip()
+    lon_raw = (request.args.get("lon") or "").strip()
+    geocode = None
 
-    geocode = geocode_address(address)
-    if not geocode:
-        return _json_error("Could not geocode that address. Try adding city/state or ZIP.", 422, "geocode_failed", "address")
+    if place_id:
+        geocode = _google_place_details_geocode(place_id, query=address or place_id)
+        if not geocode:
+            return _json_error("Could not resolve selected place.", 422, "geocode_failed", "address")
+    elif lat_raw or lon_raw:
+        if not lat_raw or not lon_raw:
+            return _json_error("lat and lon must both be provided.", 400, "invalid_coordinates", "lat")
+        try:
+            lat = float(lat_raw)
+            lon = float(lon_raw)
+        except Exception:
+            return _json_error("lat and lon must be numeric.", 400, "invalid_coordinates", "lat")
+        if lat < -90.0 or lat > 90.0 or lon < -180.0 or lon > 180.0:
+            return _json_error("lat/lon out of range.", 400, "invalid_coordinates", "lat")
+        geocode = {
+            "query": address or f"{lat:.5f},{lon:.5f}",
+            "display_name": address or f"{lat:.5f}, {lon:.5f}",
+            "lat": lat,
+            "lon": lon,
+        }
+    else:
+        if len(address) < 3:
+            return _json_error("address must be at least 3 characters.", 400, "invalid_address", "address")
+        geocode = geocode_address(address)
+        if not geocode:
+            return _json_error("Could not geocode that address. Try adding city/state or ZIP.", 422, "geocode_failed", "address")
 
     # Start narrow for speed, then widen if filters are restrictive and no results appear.
     candidate_limits = [max(limit * 4, 24)]
