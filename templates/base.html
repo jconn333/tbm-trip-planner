@@ -117,7 +117,6 @@
             <a href="/calendar" class="{% if _path.startswith('/calendar') %}active{% endif %}" aria-current="{% if _path.startswith('/calendar') %}page{% endif %}">Calendar</a>
             {% if current_user %}
               <a href="/my-flights" class="{% if _path.startswith('/my-flights') %}active{% endif %}" aria-current="{% if _path.startswith('/my-flights') %}page{% endif %}">My Flights</a>
-              <a href="/live-tracking" class="{% if _path.startswith('/live-tracking') %}active{% endif %}" aria-current="{% if _path.startswith('/live-tracking') %}page{% endif %}">Live</a>
             {% endif %}
 
             {% if current_user and current_user.role == 'admin' %}
@@ -139,7 +138,7 @@
               </div>
             {% endif %}
             {% if current_user %}
-              <div class="navDropdown {% if _path.startswith('/account') %}active{% endif %}">
+              <div class="navDropdown {% if _path.startswith('/account') or _path.startswith('/live-tracking') %}active{% endif %}">
                 <button
                   type="button"
                   class="navDropdownTrigger"
@@ -151,6 +150,7 @@
                 </button>
                 <div id="navAccountMenu" class="navDropdownMenu" role="menu" aria-label="Account">
                   <a href="/account" class="{% if _path.startswith('/account') %}active{% endif %}" aria-current="{% if _path.startswith('/account') %}page{% endif %}" role="menuitem">Profile</a>
+                  <a href="/live-tracking" class="{% if _path.startswith('/live-tracking') %}active{% endif %}" aria-current="{% if _path.startswith('/live-tracking') %}page{% endif %}" role="menuitem">Live</a>
                   <form method="post" action="/logout" class="navDropdownActionForm" role="none">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                     <button class="navDropdownAction" type="submit" role="menuitem">Sign out</button>
@@ -169,7 +169,6 @@
             <a href="/calendar" class="mobileNavLink {% if _path.startswith('/calendar') %}active{% endif %}" aria-current="{% if _path.startswith('/calendar') %}page{% endif %}">Calendar</a>
             {% if current_user %}
               <a href="/my-flights" class="mobileNavLink {% if _path.startswith('/my-flights') %}active{% endif %}" aria-current="{% if _path.startswith('/my-flights') %}page{% endif %}">My Flights</a>
-              <a href="/live-tracking" class="mobileNavLink {% if _path.startswith('/live-tracking') %}active{% endif %}" aria-current="{% if _path.startswith('/live-tracking') %}page{% endif %}">Live</a>
             {% endif %}
             {% if current_user and current_user.role == 'admin' %}
               <div class="mobileAdminSection" id="mobileAdminSection">
@@ -194,14 +193,15 @@
                 <button
                   type="button"
                   id="mobileAccountToggle"
-                  class="mobileAdminToggle {% if _path.startswith('/account') %}active{% endif %}"
-                  aria-expanded="{% if _path.startswith('/account') %}true{% else %}false{% endif %}"
+                  class="mobileAdminToggle {% if _path.startswith('/account') or _path.startswith('/live-tracking') %}active{% endif %}"
+                  aria-expanded="{% if _path.startswith('/account') or _path.startswith('/live-tracking') %}true{% else %}false{% endif %}"
                   aria-controls="mobileAccountLinks"
                 >
                   Account
                 </button>
-                <div id="mobileAccountLinks" class="mobileAccountLinks {% if _path.startswith('/account') %}is-open{% endif %}">
+                <div id="mobileAccountLinks" class="mobileAccountLinks {% if _path.startswith('/account') or _path.startswith('/live-tracking') %}is-open{% endif %}">
                   <a href="/account" class="mobileNavLink {% if _path.startswith('/account') %}active{% endif %}" aria-current="{% if _path.startswith('/account') %}page{% endif %}">Profile</a>
+                  <a href="/live-tracking" class="mobileNavLink {% if _path.startswith('/live-tracking') %}active{% endif %}" aria-current="{% if _path.startswith('/live-tracking') %}page{% endif %}">Live</a>
                   <form method="post" action="/logout" class="mobileAccountLogoutForm">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                     <button class="mobileNavLink mobileNavAction" type="submit">Sign out</button>
