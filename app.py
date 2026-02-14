@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import re
-import sqlite3
 import smtplib
 import ssl
 import secrets
@@ -18,11 +17,13 @@ from email.message import EmailMessage
 from email.utils import formataddr
 from math import asin, atan2, cos, degrees, radians, sin, sqrt
 from threading import Lock
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import airportsdata
 import certifi
 import db as storage
+import psycopg
 from auth import admin_required, hash_password, login_required, login_user, verify_password
 from dotenv import load_dotenv
 from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, has_request_context
@@ -142,7 +143,7 @@ AIRPORT_META_TIMEOUT_SEC = _env_int("AIRPORT_META_TIMEOUT_SEC", 8)
 AIRPORT_META_CACHE_TTL_SEC = _env_int("AIRPORT_META_CACHE_TTL_SEC", 21600)
 AIRPORT_META_CACHE_MAX_KEYS = _env_int("AIRPORT_META_CACHE_MAX_KEYS", 512)
 LIVE_TRACKING_TAIL = (os.getenv("LIVE_TRACKING_TAIL") or "N656W").strip().upper()
-TBM_DB_PATH = os.getenv("TBM_DB_PATH", os.path.join(BASE_DIR, "tbm.sqlite3"))
+DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
 TBM_HOME_TZ = os.getenv("TBM_HOME_TZ", "America/New_York")
 TBM_DEFAULT_PARKED_ICAO = (os.getenv("TBM_DEFAULT_PARKED_ICAO") or "").strip().upper()
 TBM_BOOTSTRAP_ADMIN_EMAIL = (os.getenv("TBM_BOOTSTRAP_ADMIN_EMAIL") or "").strip()
@@ -300,7 +301,7 @@ def _load_runtime_settings(force: bool = False) -> dict[str, str]:
     defaults = _default_runtime_settings()
     db_values: dict[str, str] = {}
     try:
-        with storage.get_conn(TBM_DB_PATH) as conn:
+        with storage.get_conn(DATABASE_URL) as conn:
             db_values = storage.list_settings(conn)
     except Exception:
         logger.exception("settings_load_failed")
@@ -829,7 +830,9 @@ def _extract_local_datetime_from_payload(
 
 
 def _db_conn():
-    return storage.get_conn(TBM_DB_PATH)
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is not configured.")
+    return storage.get_conn(DATABASE_URL)
 
 
 def _request_id() -> str:
@@ -1351,7 +1354,7 @@ def _planner_quote_draft_row_or_error(conn, *, token: str, user_id: int):
         return None, {"message": "This draft has already been submitted.", "code": "draft_consumed", "status": 409}
     if row["expires_at_utc"] <= now_utc:
         conn.execute(
-            "UPDATE planner_quote_drafts SET status = 'expired' WHERE id = ? AND status = 'open'",
+            "UPDATE planner_quote_drafts SET status = 'expired' WHERE id = %s AND status = 'open'",
             (int(row["id"]),),
         )
         conn.commit()
@@ -1360,6 +1363,9 @@ def _planner_quote_draft_row_or_error(conn, *, token: str, user_id: int):
 
 
 def _bootstrap_admin_if_configured() -> None:
+    if not DATABASE_URL:
+        logger.info("bootstrap_admin_skipped reason=missing_database_url")
+        return
     if not TBM_BOOTSTRAP_ADMIN_EMAIL or not TBM_BOOTSTRAP_ADMIN_NAME or not TBM_BOOTSTRAP_ADMIN_PASSWORD:
         logger.info("bootstrap_admin_skipped reason=missing_env")
         return
@@ -1558,7 +1564,7 @@ def _flightaware_live_url(tail_number: str) -> str:
     return f"https://www.flightaware.com/live/flight/{urllib.parse.quote((tail_number or LIVE_TRACKING_TAIL).strip().upper())}"
 
 
-def _owner_invite_status(conn: sqlite3.Connection, *, owner_user_id: int):
+def _owner_invite_status(conn: Any, *, owner_user_id: int):
     storage.expire_open_owner_invites(conn, now_utc=_utc_now().isoformat())
     invite = storage.get_latest_owner_invite_for_user(conn, user_id=int(owner_user_id))
     if not invite:
@@ -1573,7 +1579,7 @@ def _owner_invite_link(token: str) -> str:
 
 
 def _log_owner_audit(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     owner_user_id: int,
     action: str,
@@ -1592,7 +1598,7 @@ def _log_owner_audit(
 
 
 def _create_owner_invite(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     owner_user_id: int,
     expires_hours: int,
@@ -3601,7 +3607,7 @@ def api_create_owner():
             else:
                 _log_owner_audit(conn, owner_user_id=owner_id, action="create_temp_password", metadata={"email": email})
             owner = storage.get_user_by_id(conn, owner_id)
-    except sqlite3.IntegrityError:
+    except psycopg.errors.UniqueViolation:
         return _json_error("An account with this email already exists.", 409, "owner_exists", "email")
     response = {"ok": True, "owner": _serialize_user(owner), "mode": mode}
     if invite_payload:
@@ -3644,14 +3650,14 @@ def api_update_owner(user_id: int):
                 return _json_error("Owner not found.", 404, "not_found")
             if target["role"] != "owner":
                 return _json_error("Only owners can be updated here.", 400, "invalid_owner")
-            set_clause = ", ".join(f"{k} = ?" for k in updates.keys())
+            set_clause = ", ".join(f"{k} = %s" for k in updates.keys())
             values = [updates[k] for k in updates.keys()]
             values.append(int(user_id))
-            conn.execute(f"UPDATE users SET {set_clause} WHERE id = ?", tuple(values))
+            conn.execute(f"UPDATE users SET {set_clause} WHERE id = %s", tuple(values))
             conn.commit()
             _log_owner_audit(conn, owner_user_id=user_id, action="owner_profile_updated", metadata=metadata)
             refreshed = storage.get_user_by_id(conn, user_id)
-    except sqlite3.IntegrityError:
+    except psycopg.errors.UniqueViolation:
         return _json_error("An account with this email already exists.", 409, "owner_exists", "email")
 
     return jsonify({"ok": True, "owner": _serialize_user(refreshed)})
@@ -4529,7 +4535,8 @@ def api_submit_planner_quote_draft(token: str):
                     INSERT INTO reservations (
                         status, start_utc, end_utc, dep_icao, dest_icao, parked_icao,
                         traveling_user_id, requested_by_user_id, notes, created_at_utc, updated_at_utc
-                    ) VALUES ('pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES ('pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
                     """,
                     (
                         normalized["start_utc"],
@@ -4544,12 +4551,13 @@ def api_submit_planner_quote_draft(token: str):
                         now_utc,
                     ),
                 )
-                created_rows.append(storage.get_reservation_by_id(conn, int(cur.lastrowid)))
+                created_id = int(cur.fetchone()["id"])
+                created_rows.append(storage.get_reservation_by_id(conn, created_id))
             conn.execute(
                 """
                 UPDATE planner_quote_drafts
-                SET status = 'consumed', consumed_at_utc = ?
-                WHERE id = ?
+                SET status = 'consumed', consumed_at_utc = %s
+                WHERE id = %s
                   AND status = 'open'
                 """,
                 (now_utc, int(row["id"])),
@@ -4751,22 +4759,23 @@ def health():
 @app.get("/api/admin/system-metrics")
 @admin_required
 def api_admin_system_metrics():
-    db_exists = os.path.exists(TBM_DB_PATH)
-    db_size_bytes = os.path.getsize(TBM_DB_PATH) if db_exists else 0
-    db_user_version = 0
-    if db_exists:
-        with storage.get_conn(TBM_DB_PATH) as conn:
-            db_user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    db_connected = False
+    schema_version = 0
+    try:
+        with storage.get_conn(DATABASE_URL) as conn:
+            db_connected = True
+            schema_version = storage.get_schema_version(conn)
+    except Exception:
+        logger.exception("system_metrics_db_check_failed")
     return jsonify(
         {
             "app": APP_NAME,
             "env": APP_ENV,
             "request_id": _request_id(),
             "db": {
-                "path": TBM_DB_PATH,
-                "exists": db_exists,
-                "size_bytes": db_size_bytes,
-                "user_version": db_user_version,
+                "engine": "postgres",
+                "connected": db_connected,
+                "schema_version": schema_version,
             },
             "caches": {
                 "settings_cache_keys": len(_SETTINGS_CACHE),
@@ -4781,21 +4790,23 @@ def api_admin_system_metrics():
 def _startup_safety_checks() -> None:
     secret = app.config.get("SECRET_KEY") or ""
     if IS_PRODUCTION:
+        if not DATABASE_URL:
+            raise RuntimeError("DATABASE_URL must be set in production.")
         if not secret or secret == "dev-change-me":
             raise RuntimeError("FLASK_SECRET_KEY must be set to a strong value in production.")
-        db_dir = os.path.dirname(TBM_DB_PATH) or "."
-        if not os.path.isdir(db_dir):
-            raise RuntimeError(f"TBM_DB_PATH directory does not exist: {db_dir}")
     elif secret == "dev-change-me":
         logger.warning("using_default_dev_secret_key env=%s", APP_ENV)
 
 
 START_TIME_EPOCH = time.time()
 _startup_safety_checks()
-storage.init_db(TBM_DB_PATH)
-with storage.get_conn(TBM_DB_PATH) as _conn:
-    storage.seed_settings_defaults(_conn, _default_runtime_settings())
-_invalidate_settings_cache()
+if DATABASE_URL:
+    storage.init_db(DATABASE_URL)
+    with storage.get_conn(DATABASE_URL) as _conn:
+        storage.seed_settings_defaults(_conn, _default_runtime_settings())
+    _invalidate_settings_cache()
+else:
+    logger.warning("database_init_skipped reason=missing_database_url")
 _bootstrap_admin_if_configured()
 
 

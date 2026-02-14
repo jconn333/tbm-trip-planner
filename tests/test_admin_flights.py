@@ -1,4 +1,7 @@
+import os
 from datetime import datetime, timedelta
+
+import pytest
 
 import app as tbm_app
 import db as storage
@@ -53,12 +56,15 @@ def _make_approved(owner_client, admin_client, start: datetime, end: datetime):
     return rid
 
 
-def _setup_env(tmp_path, monkeypatch):
-    db_path = tmp_path / "test_admin.sqlite3"
-    monkeypatch.setattr(tbm_app, "TBM_DB_PATH", str(db_path))
+def _setup_env(monkeypatch):
+    db_url = os.environ.get("TEST_DATABASE_URL") or tbm_app.DATABASE_URL
+    if not db_url:
+        pytest.skip("Set TEST_DATABASE_URL (or DATABASE_URL) for Postgres-backed tests.")
+    monkeypatch.setattr(tbm_app, "DATABASE_URL", db_url)
     monkeypatch.setattr(tbm_app, "TBM_HOME_TZ", "America/New_York")
-    storage.init_db(str(db_path))
-    with storage.get_conn(str(db_path)) as conn:
+    storage.init_db(db_url)
+    with storage.get_conn(db_url) as conn:
+        storage.reset_for_tests(conn)
         storage.seed_settings_defaults(conn, tbm_app._default_runtime_settings())
         admin = storage.create_user(
             conn,
@@ -86,7 +92,7 @@ def _setup_env(tmp_path, monkeypatch):
 
 
 def test_admin_settings_get_and_patch(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     client = tbm_app.app.test_client()
     _login(client, "admin@example.com", "adminpass123")
 
@@ -119,7 +125,7 @@ def test_admin_settings_get_and_patch(tmp_path, monkeypatch):
 
 
 def test_admin_settings_dependency_validation(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     client = tbm_app.app.test_client()
     _login(client, "admin@example.com", "adminpass123")
 
@@ -139,7 +145,7 @@ def test_admin_settings_dependency_validation(tmp_path, monkeypatch):
 
 
 def test_admin_flights_defaults_to_future_only(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin_client = tbm_app.app.test_client()
     owner_client = tbm_app.app.test_client()
     _login(admin_client, "admin@example.com", "adminpass123")
@@ -162,7 +168,7 @@ def test_admin_flights_defaults_to_future_only(tmp_path, monkeypatch):
 
 
 def test_my_flights_and_change_request_workflow(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin_client = tbm_app.app.test_client()
     owner_client = tbm_app.app.test_client()
     _login(admin_client, "admin@example.com", "adminpass123")
@@ -195,13 +201,13 @@ def test_my_flights_and_change_request_workflow(tmp_path, monkeypatch):
     approved = admin_client.post(f"/api/reservations/{rid}/change-requests/{request_id}/approve")
     assert approved.status_code == 200
 
-    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+    with storage.get_conn(tbm_app.DATABASE_URL) as conn:
         row = storage.get_reservation_by_id(conn, rid)
         assert row["dest_icao"] == "KJFK"
 
 
 def test_owner_cannot_create_change_request_for_other_owner(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin_client = tbm_app.app.test_client()
     owner_client = tbm_app.app.test_client()
     owner2_client = tbm_app.app.test_client()

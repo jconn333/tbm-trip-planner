@@ -132,7 +132,7 @@ def create_reservations_blueprint(
                 FROM reservations r
                 JOIN users tu ON tu.id = r.traveling_user_id
                 WHERE r.status = 'pending'
-                  AND r.requested_by_user_id = ?
+                  AND r.requested_by_user_id = %s
                 ORDER BY r.start_utc ASC
                 """,
                 (int(g.current_user["id"]),),

@@ -1,3 +1,4 @@
+import os
 from datetime import date, timedelta
 
 import pytest
@@ -167,12 +168,15 @@ def no_winds(monkeypatch):
 
 
 @pytest.fixture
-def planner_auth_env(tmp_path, monkeypatch):
-    db_path = tmp_path / "test_planner_auth.sqlite3"
-    monkeypatch.setattr(tbm_app, "TBM_DB_PATH", str(db_path))
+def planner_auth_env(monkeypatch):
+    db_url = os.environ.get("TEST_DATABASE_URL") or tbm_app.DATABASE_URL
+    if not db_url:
+        pytest.skip("Set TEST_DATABASE_URL (or DATABASE_URL) for Postgres-backed tests.")
+    monkeypatch.setattr(tbm_app, "DATABASE_URL", db_url)
     monkeypatch.setattr(tbm_app, "TBM_HOME_TZ", "America/New_York")
-    storage.init_db(str(db_path))
-    with storage.get_conn(str(db_path)) as conn:
+    storage.init_db(db_url)
+    with storage.get_conn(db_url) as conn:
+        storage.reset_for_tests(conn)
         storage.create_user(
             conn,
             email="owner@example.com",
@@ -180,7 +184,7 @@ def planner_auth_env(tmp_path, monkeypatch):
             role="owner",
             password_hash=hash_password("ownerpass123"),
         )
-    return str(db_path)
+    return db_url
 
 
 def _attach_csrf_headers(client):
