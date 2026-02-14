@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 import airportsdata
 import certifi
 import db as storage
-from auth import admin_required, hash_password, login_required, verify_password
+from auth import admin_required, hash_password, login_required, login_user, verify_password
 from dotenv import load_dotenv
 from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for
 from routes_auth import create_auth_blueprint
@@ -451,23 +451,33 @@ def _enforce_rate_limit(endpoint: str) -> tuple[bool, int | None]:
 
 
 def _serialize_user(row) -> dict:
-    return {
+    payload = {
         "id": int(row["id"]),
         "email": row["email"],
         "name": row["name"],
         "role": row["role"],
     }
+    keys = row.keys()
+    if "is_disabled" in keys:
+        payload["is_disabled"] = int(row["is_disabled"]) == 1
+    if "must_reset_password" in keys:
+        payload["must_reset_password"] = int(row["must_reset_password"]) == 1
+    if "last_login_at_utc" in keys:
+        payload["last_login_at"] = _utc_iso_to_local_iso(row["last_login_at_utc"]) if row["last_login_at_utc"] else None
+    return payload
 
 
 def _account_view_context(*, row, form_error: str | None = None, form_success: str | None = None) -> dict:
     account_user = _serialize_user(row)
     created_at_utc = row["created_at_utc"] if "created_at_utc" in row.keys() else None
     created_at_display = _utc_iso_to_local_display(created_at_utc) if created_at_utc else None
+    force_reset_required = int(row["must_reset_password"]) == 1 if "must_reset_password" in row.keys() else False
     return {
         "app_name": APP_NAME,
         "home_timezone": _effective_home_timezone_name(),
         "account_user": account_user,
         "account_created_at_display": created_at_display,
+        "force_reset_required": force_reset_required,
         "form_error": form_error,
         "form_success": form_success,
     }
@@ -940,6 +950,45 @@ def apply_request_guards():
     return None
 
 
+@app.before_request
+def enforce_owner_enabled():
+    user = getattr(g, "current_user", None)
+    if not user or user.get("role") != "owner":
+        return None
+    if not user.get("is_disabled"):
+        return None
+    if request.path in {"/logout", "/api/logout"}:
+        return None
+    session.pop("user_id", None)
+    if request.path.startswith("/api/"):
+        return _json_error("This account is disabled. Contact an admin.", 403, "owner_disabled")
+    return redirect(url_for("login"))
+
+
+@app.before_request
+def enforce_owner_password_reset():
+    user = getattr(g, "current_user", None)
+    if not user or user.get("role") != "owner":
+        return None
+    if not user.get("must_reset_password"):
+        return None
+
+    allowed_paths = {
+        "/account",
+        "/account/password",
+        "/logout",
+        "/api/logout",
+    }
+    if request.path in allowed_paths:
+        return None
+    if request.path.startswith("/static/"):
+        return None
+
+    if request.path.startswith("/api/"):
+        return _json_error("Password reset required before continuing.", 409, "password_reset_required")
+    return redirect(url_for("account_page", force_reset=1))
+
+
 @app.after_request
 def add_response_metadata(response):
     response.headers["X-Request-Id"] = _request_id()
@@ -994,6 +1043,64 @@ def _json_error(message: str, status: int = 400, code: str = "bad_request", fiel
 
 def _flightaware_live_url(tail_number: str) -> str:
     return f"https://www.flightaware.com/live/flight/{urllib.parse.quote((tail_number or LIVE_TRACKING_TAIL).strip().upper())}"
+
+
+def _owner_invite_status(conn: sqlite3.Connection, *, owner_user_id: int):
+    storage.expire_open_owner_invites(conn, now_utc=_utc_now().isoformat())
+    invite = storage.get_latest_owner_invite_for_user(conn, user_id=int(owner_user_id))
+    if not invite:
+        return "none", None, None
+    status = invite["status"]
+    return status, invite["expires_at_utc"], invite["token"]
+
+
+def _owner_invite_link(token: str) -> str:
+    base = (request.host_url or "").rstrip("/")
+    return f"{base}/accept-invite/{urllib.parse.quote(token)}"
+
+
+def _log_owner_audit(
+    conn: sqlite3.Connection,
+    *,
+    owner_user_id: int,
+    action: str,
+    metadata: dict | None = None,
+):
+    actor_user_id = int(g.current_user["id"]) if getattr(g, "current_user", None) else None
+    storage.create_owner_audit_event(
+        conn,
+        owner_user_id=int(owner_user_id),
+        action=action,
+        actor_user_id=actor_user_id,
+        metadata_json=json.dumps(metadata or {}),
+    )
+
+
+def _create_owner_invite(
+    conn: sqlite3.Connection,
+    *,
+    owner_user_id: int,
+    expires_hours: int,
+    action_name: str,
+):
+    hours = max(1, min(168, int(expires_hours)))
+    storage.expire_open_owner_invites(conn, now_utc=_utc_now().isoformat())
+    storage.revoke_open_owner_invites_for_user(conn, user_id=int(owner_user_id))
+    token = secrets.token_urlsafe(32)
+    invite = storage.create_owner_invite(
+        conn,
+        user_id=int(owner_user_id),
+        token=token,
+        expires_at_utc=(_utc_now() + timedelta(hours=hours)).isoformat(),
+        created_by_user_id=int(g.current_user["id"]) if getattr(g, "current_user", None) else None,
+    )
+    _log_owner_audit(
+        conn,
+        owner_user_id=int(owner_user_id),
+        action=action_name,
+        metadata={"invite_id": int(invite["id"]), "expires_at_utc": invite["expires_at_utc"]},
+    )
+    return invite
 
 
 
@@ -2153,6 +2260,83 @@ def live_tracking_page():
     )
 
 
+@app.get("/accept-invite/<string:token>")
+def accept_invite_page(token: str):
+    token_in = (token or "").strip()
+    if not token_in:
+        return render_template("accept_invite.html", app_name=APP_NAME, status="invalid", error="Invalid invite token.")
+    with _db_conn() as conn:
+        storage.expire_open_owner_invites(conn, now_utc=_utc_now().isoformat())
+        invite = storage.get_owner_invite_by_token(conn, token_in)
+        if not invite:
+            return render_template("accept_invite.html", app_name=APP_NAME, status="invalid", error="Invite not found.")
+        owner = storage.get_user_by_id(conn, int(invite["user_id"]))
+        if not owner:
+            return render_template("accept_invite.html", app_name=APP_NAME, status="invalid", error="Invite owner not found.")
+        if int(owner["is_disabled"]) == 1:
+            return render_template("accept_invite.html", app_name=APP_NAME, status="disabled", error="This account is disabled.")
+        if invite["status"] != "open":
+            return render_template(
+                "accept_invite.html",
+                app_name=APP_NAME,
+                status=invite["status"],
+                error=f"Invite is {invite['status']}.",
+                owner_name=owner["name"],
+                owner_email=owner["email"],
+            )
+        return render_template(
+            "accept_invite.html",
+            app_name=APP_NAME,
+            status="open",
+            token=token_in,
+            owner_name=owner["name"],
+            owner_email=owner["email"],
+            expires_at=_utc_iso_to_local_display(invite["expires_at_utc"]),
+            error=None,
+        )
+
+
+@app.post("/accept-invite/<string:token>")
+def accept_invite_post(token: str):
+    token_in = (token or "").strip()
+    password = str(request.form.get("password") or "")
+    confirm_password = str(request.form.get("confirm_password") or "")
+    if len(password) < 8:
+        return render_template("accept_invite.html", app_name=APP_NAME, status="open", token=token_in, error="Password must be at least 8 characters."), 400
+    if password != confirm_password:
+        return render_template("accept_invite.html", app_name=APP_NAME, status="open", token=token_in, error="Passwords must match."), 400
+
+    with _db_conn() as conn:
+        storage.expire_open_owner_invites(conn, now_utc=_utc_now().isoformat())
+        invite = storage.get_owner_invite_by_token(conn, token_in)
+        if not invite:
+            return render_template("accept_invite.html", app_name=APP_NAME, status="invalid", error="Invite not found."), 404
+        owner = storage.get_user_by_id(conn, int(invite["user_id"]))
+        if not owner:
+            return render_template("accept_invite.html", app_name=APP_NAME, status="invalid", error="Invite owner not found."), 404
+        if invite["status"] != "open":
+            return render_template("accept_invite.html", app_name=APP_NAME, status=invite["status"], error=f"Invite is {invite['status']}."), 409
+        if int(owner["is_disabled"]) == 1:
+            return render_template("accept_invite.html", app_name=APP_NAME, status="disabled", error="This account is disabled."), 403
+        storage.set_user_password(conn, int(owner["id"]), hash_password(password))
+        storage.set_user_flags(conn, int(owner["id"]), must_reset_password=0)
+        storage.update_owner_invite_fields(
+            conn,
+            int(invite["id"]),
+            {"status": "consumed", "consumed_at_utc": _utc_now().isoformat()},
+        )
+        storage.create_owner_audit_event(
+            conn,
+            owner_user_id=int(owner["id"]),
+            action="password_changed_owner",
+            actor_user_id=None,
+            metadata_json=json.dumps({"source": "invite_accept"}),
+        )
+        login_user(int(owner["id"]))
+
+    return render_template("accept_invite.html", app_name=APP_NAME, status="success", error=None)
+
+
 @app.get("/account")
 @login_required
 def account_page():
@@ -2202,6 +2386,13 @@ def account_password_post():
             ), 400
 
         storage.set_user_password(conn, int(row["id"]), hash_password(new_password))
+        storage.set_user_flags(conn, int(row["id"]), must_reset_password=0)
+        _log_owner_audit(
+            conn,
+            owner_user_id=int(row["id"]),
+            action="password_changed_owner",
+            metadata={"source": "account_password_post"},
+        )
         refreshed = storage.get_user_by_id(conn, int(row["id"]))
 
     return render_template(
@@ -2278,6 +2469,10 @@ def api_owners():
             owner_id = int(owner["id"])
             owner["default_color"] = _default_owner_color(owner_id)
             owner["color"] = _effective_owner_color(owner_id)
+            invite_status, invite_expires_at_utc, invite_token = _owner_invite_status(conn, owner_user_id=owner_id)
+            owner["invite_status"] = invite_status
+            owner["invite_expires_at"] = _utc_iso_to_local_iso(invite_expires_at_utc) if invite_expires_at_utc else None
+            owner["invite_link"] = _owner_invite_link(invite_token) if invite_status == "open" and invite_token else None
             owners.append(owner)
     return jsonify(owners)
 
@@ -2288,23 +2483,48 @@ def api_create_owner():
     data = request.get_json(silent=True) or {}
     name = str(data.get("name") or "").strip()
     email = str(data.get("email") or "").strip().lower()
+    mode = str(data.get("mode") or "invite").strip().lower()
+    if mode not in ("invite", "temp_password"):
+        return _json_error("mode must be 'invite' or 'temp_password'.", 400, "invalid_owner", "mode")
     password = str(data.get("password") or "")
-    if not name or not email or not password:
-        return _json_error("name, email, and password are required.", 400, "invalid_owner")
-    if len(password) < 8:
+    if not name or not email:
+        return _json_error("name and email are required.", 400, "invalid_owner")
+    if mode == "temp_password" and len(password) < 8:
         return _json_error("password must be at least 8 characters.", 400, "weak_password", "password")
     try:
         with _db_conn() as conn:
+            password_hash = hash_password(password if mode == "temp_password" else secrets.token_urlsafe(32))
             owner = storage.create_user(
                 conn,
                 email=email,
                 name=name,
                 role="owner",
-                password_hash=hash_password(password),
+                password_hash=password_hash,
             )
+            owner_id = int(owner["id"])
+            storage.set_user_flags(
+                conn,
+                owner_id,
+                must_reset_password=(1 if mode == "temp_password" else 0),
+                is_disabled=0,
+            )
+            invite_payload = None
+            if mode == "invite":
+                invite = _create_owner_invite(conn, owner_user_id=owner_id, expires_hours=int(data.get("expires_hours") or 72), action_name="invite_created")
+                invite_payload = {
+                    "status": invite["status"],
+                    "expires_at": _utc_iso_to_local_iso(invite["expires_at_utc"]),
+                    "link": _owner_invite_link(invite["token"]),
+                }
+            else:
+                _log_owner_audit(conn, owner_user_id=owner_id, action="create_temp_password", metadata={"email": email})
+            owner = storage.get_user_by_id(conn, owner_id)
     except sqlite3.IntegrityError:
         return _json_error("An account with this email already exists.", 409, "owner_exists", "email")
-    return jsonify({"ok": True, "owner": _serialize_user(owner)}), 201
+    response = {"ok": True, "owner": _serialize_user(owner), "mode": mode}
+    if invite_payload:
+        response["invite"] = invite_payload
+    return jsonify(response), 201
 
 
 @app.post("/api/owners/<int:user_id>/reset-password")
@@ -2321,7 +2541,137 @@ def api_owner_reset_password(user_id: int):
         if target["role"] != "owner":
             return _json_error("Only owner passwords can be reset here.", 400, "invalid_owner")
         storage.set_user_password(conn, user_id, hash_password(password))
+        storage.set_user_flags(conn, user_id, must_reset_password=1)
+        _log_owner_audit(conn, owner_user_id=user_id, action="password_reset_admin")
     return jsonify({"ok": True})
+
+
+@app.post("/api/owners/<int:user_id>/invites")
+@admin_required
+def api_owner_create_invite(user_id: int):
+    data = request.get_json(silent=True) or {}
+    expires_hours = data.get("expires_hours") or 72
+    try:
+        expires_hours = int(expires_hours)
+    except Exception:
+        return _json_error("expires_hours must be an integer.", 400, "invalid_owner", "expires_hours")
+    with _db_conn() as conn:
+        target = storage.get_user_by_id(conn, user_id)
+        if not target or target["role"] != "owner":
+            return _json_error("Owner not found.", 404, "not_found")
+        invite = _create_owner_invite(conn, owner_user_id=user_id, expires_hours=expires_hours, action_name="invite_resent")
+    return jsonify(
+        {
+            "ok": True,
+            "invite": {
+                "status": invite["status"],
+                "expires_at": _utc_iso_to_local_iso(invite["expires_at_utc"]),
+                "link": _owner_invite_link(invite["token"]),
+            },
+        }
+    )
+
+
+@app.post("/api/owners/<int:user_id>/invites/revoke")
+@admin_required
+def api_owner_revoke_invite(user_id: int):
+    with _db_conn() as conn:
+        target = storage.get_user_by_id(conn, user_id)
+        if not target or target["role"] != "owner":
+            return _json_error("Owner not found.", 404, "not_found")
+        storage.revoke_open_owner_invites_for_user(conn, user_id=user_id)
+        _log_owner_audit(conn, owner_user_id=user_id, action="invite_revoked")
+    return jsonify({"ok": True})
+
+
+@app.post("/api/owners/<int:user_id>/disable")
+@admin_required
+def api_owner_disable(user_id: int):
+    with _db_conn() as conn:
+        target = storage.get_user_by_id(conn, user_id)
+        if not target or target["role"] != "owner":
+            return _json_error("Owner not found.", 404, "not_found")
+        storage.set_user_flags(conn, user_id, is_disabled=1)
+        _log_owner_audit(conn, owner_user_id=user_id, action="disabled")
+    return jsonify({"ok": True})
+
+
+@app.post("/api/owners/<int:user_id>/enable")
+@admin_required
+def api_owner_enable(user_id: int):
+    with _db_conn() as conn:
+        target = storage.get_user_by_id(conn, user_id)
+        if not target or target["role"] != "owner":
+            return _json_error("Owner not found.", 404, "not_found")
+        storage.set_user_flags(conn, user_id, is_disabled=0)
+        _log_owner_audit(conn, owner_user_id=user_id, action="enabled")
+    return jsonify({"ok": True})
+
+
+@app.post("/api/owners/<int:user_id>/force-password-reset")
+@admin_required
+def api_owner_force_password_reset(user_id: int):
+    with _db_conn() as conn:
+        target = storage.get_user_by_id(conn, user_id)
+        if not target or target["role"] != "owner":
+            return _json_error("Owner not found.", 404, "not_found")
+        storage.set_user_flags(conn, user_id, must_reset_password=1)
+        _log_owner_audit(conn, owner_user_id=user_id, action="password_reset_forced")
+    return jsonify({"ok": True})
+
+
+@app.get("/api/admin/owners/audit")
+@admin_required
+def api_admin_owner_audit():
+    owner_id_raw = (request.args.get("owner_id") or "").strip()
+    action = (request.args.get("action") or "").strip()
+    page_raw = (request.args.get("page") or "1").strip()
+    page_size_raw = (request.args.get("page_size") or "25").strip()
+    owner_id = None
+    if owner_id_raw:
+        try:
+            owner_id = int(owner_id_raw)
+        except Exception:
+            return _json_error("owner_id must be an integer.", 400, "invalid_owner", "owner_id")
+    try:
+        page = max(1, int(page_raw))
+    except Exception:
+        return _json_error("page must be an integer.", 400, "invalid_page", "page")
+    try:
+        page_size = max(1, min(100, int(page_size_raw)))
+    except Exception:
+        return _json_error("page_size must be an integer.", 400, "invalid_page_size", "page_size")
+
+    with _db_conn() as conn:
+        result = storage.list_owner_audit_events(
+            conn,
+            owner_user_id=owner_id,
+            action=action or None,
+            page=page,
+            page_size=page_size,
+        )
+    rows = []
+    for row in result["rows"]:
+        metadata = {}
+        if row["metadata_json"]:
+            try:
+                metadata = json.loads(row["metadata_json"])
+            except Exception:
+                metadata = {}
+        rows.append(
+            {
+                "id": int(row["id"]),
+                "owner_user_id": int(row["owner_user_id"]),
+                "owner_name": row["owner_name"],
+                "owner_email": row["owner_email"],
+                "action": row["action"],
+                "actor_user_id": int(row["actor_user_id"]) if row["actor_user_id"] is not None else None,
+                "actor_name": row["actor_name"] or row["actor_email"] or "System",
+                "metadata": metadata,
+                "created_at": _utc_iso_to_local_iso(row["created_at_utc"]),
+            }
+        )
+    return jsonify({"items": rows, "total": int(result["total"]), "page": page, "page_size": page_size})
 
 
 @app.get("/api/admin/settings")

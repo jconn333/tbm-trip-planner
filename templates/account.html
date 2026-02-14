@@ -73,6 +73,9 @@
 
   <article class="panel accountCard">
     <h2>Change Password</h2>
+    {% if force_reset_required %}
+      <div class="msg is-error">Password reset is required before you can access other pages.</div>
+    {% endif %}
     <p class="uiMeta">Use your current password to confirm this change.</p>
     {% if form_error %}
       <div class="msg is-error">{{ form_error }}</div>

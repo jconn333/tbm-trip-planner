@@ -1,22 +1,36 @@
 {% extends "base.html" %}
 {% block title %}Admin · {{ app_name }}{% endblock %}
-{% block header_subtitle %}Approval queue and owner account management.{% endblock %}
+{% block header_subtitle %}Approval queue and owner lifecycle management.{% endblock %}
 {% block page_styles %}
 .layout{ display:grid; grid-template-columns: 1.2fr 0.8fr; gap:12px; }
 @media (max-width: 980px){ .layout{ grid-template-columns:1fr; } }
-.panel{ border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.05); border-radius:16px; padding:12px; }
+.panel{ border:1px solid var(--color-border); background:var(--color-surface); border-radius:16px; padding:12px; }
 .panel h3{ margin:0 0 10px; font-size:15px; }
-.row{ border-top:1px solid rgba(255,255,255,0.1); padding:10px 0; }
+.row{ border-top:1px solid var(--color-border); padding:10px 0; }
 .row:first-child{ border-top:0; }
-.muted{ color:var(--muted); font-size:12px; }
-.actions{ display:flex; gap:8px; margin-top:8px; }
-.btn{ border:1px solid rgba(255,255,255,0.2); background:rgba(255,255,255,0.06); color:var(--text); border-radius:999px; padding:7px 12px; cursor:pointer; font-size:12px; }
-.btn.ok{ border-color:rgba(124,242,194,0.45); background:rgba(124,242,194,0.18); }
-.btn.no{ border-color:rgba(255,92,112,0.55); background:rgba(255,92,112,0.18); }
+.muted{ color:var(--color-muted); font-size:12px; }
+.actions{ display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+.btn{ border:1px solid var(--color-border); background:var(--color-surface-soft); color:var(--color-text); border-radius:999px; padding:7px 12px; cursor:pointer; font-size:12px; }
+.btn.ok{ border-color:#9ed8b4; background:#eaf8ef; }
+.btn.no{ border-color:#e2acb3; background:#fff1f3; }
 .field{ margin-bottom:10px; }
-.field label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
-.field input, .field select{ width:100%; border:1px solid rgba(255,255,255,0.18); background:rgba(8,14,28,0.5); color:var(--text); border-radius:10px; padding:9px 10px; }
-.msg{ color:var(--muted); font-size:12px; min-height:16px; margin-top:8px; }
+.field label{ display:block; font-size:12px; color:var(--color-muted); margin-bottom:6px; }
+.field input, .field select{ width:100%; border:1px solid var(--color-border); background:var(--color-surface-soft); color:var(--color-text); border-radius:10px; padding:9px 10px; }
+.msg{ color:var(--color-muted); font-size:12px; min-height:16px; margin-top:8px; white-space:pre-wrap; }
+.ownerList{ display:grid; gap:10px; }
+.ownerCard{ border:1px solid var(--color-border); background:var(--color-surface-soft); border-radius:12px; padding:10px; }
+.ownerTop{ display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+.ownerName{ font-weight:700; }
+.ownerMeta{ font-size:12px; color:var(--color-muted); margin-top:4px; }
+.statusChips{ display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+.chip{ border:1px solid var(--color-border); border-radius:999px; padding:2px 8px; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; }
+.chip.bad{ border-color:#e2acb3; background:#fff1f3; color:#782532; }
+.chip.good{ border-color:#9ed8b4; background:#eaf8ef; color:#245736; }
+.chip.warn{ border-color:#e5c8a2; background:#fff6ea; color:#8a5a20; }
+.auditList{ display:grid; gap:8px; }
+.auditItem{ border-top:1px solid var(--color-border); padding-top:8px; }
+.auditItem:first-child{ border-top:0; padding-top:0; }
+.filters{ display:grid; grid-template-columns:1fr 140px; gap:8px; margin-bottom:8px; }
 {% endblock %}
 {% block content %}
 <section class="layout">
@@ -27,50 +41,91 @@
 
   <div class="panel">
     <h3>Create Owner</h3>
-    <div class="muted" style="margin-bottom:10px;">
-      Local/staging test owners you can add here:
-      <br /><code>Owner Test One</code> / <code>owner.test1@example.com</code>
-      <br /><code>Owner Test Two</code> / <code>owner.test2@example.com</code>
-      <br /><code>Owner Test Three</code> / <code>owner.test3@example.com</code>
-      <br />Use a temporary password like <code>OwnerTest123!</code> (8+ chars).
+    <div class="field">
+      <label for="createMode">Creation Mode</label>
+      <select id="createMode" class="js-custom-select">
+        <option value="invite">Invite (recommended)</option>
+        <option value="temp_password">Temporary Password</option>
+      </select>
     </div>
     <div class="field"><label for="ownerName">Name</label><input id="ownerName" type="text" /></div>
     <div class="field"><label for="ownerEmail">Email</label><input id="ownerEmail" type="email" /></div>
-    <div class="field"><label for="ownerPassword">Temporary Password</label><input id="ownerPassword" type="password" /></div>
+    <div class="field" id="tempPasswordField"><label for="ownerPassword">Temporary Password</label><input id="ownerPassword" type="password" /></div>
     <button id="createOwnerBtn" class="btn ok" type="button">Create Owner</button>
+    <button id="copyInviteBtn" class="btn" type="button" style="display:none;">Copy Invite Link</button>
     <div id="createOwnerMsg" class="msg"></div>
-
-    <h3 style="margin-top:18px;">Reset Owner Password</h3>
-    <div class="field">
-      <label for="ownerSelect">Owner</label>
-      <select id="ownerSelect" class="js-custom-select">
-        {% for owner in owners %}
-          <option value="{{ owner.id }}">{{ owner.name }} ({{ owner.email }})</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="field"><label for="resetPassword">New Temporary Password</label><input id="resetPassword" type="password" /></div>
-    <button id="resetOwnerBtn" class="btn" type="button">Reset Password</button>
-    <div id="resetMsg" class="msg"></div>
+    <input id="latestInviteLink" type="hidden" />
   </div>
+</section>
+
+<section class="panel" style="margin-top:12px;">
+  <h3>Owner List / Actions</h3>
+  <div class="filters">
+    <input id="ownerSearch" type="text" placeholder="Search name or email" />
+    <select id="ownerStatusFilter" class="js-custom-select">
+      <option value="all">All Statuses</option>
+      <option value="active">Active</option>
+      <option value="disabled">Disabled</option>
+      <option value="must_reset">Must Reset</option>
+      <option value="invite_open">Invite Open</option>
+    </select>
+  </div>
+  <div id="ownerList" class="ownerList"><div class="muted">Loading owners...</div></div>
+</section>
+
+<section class="panel" style="margin-top:12px;">
+  <h3>Owner Audit</h3>
+  <div id="ownerAudit" class="auditList"><div class="muted">Loading audit events...</div></div>
 </section>
 {% endblock %}
 {% block scripts %}
 <script>
 (() => {
   const pendingWrap = document.getElementById('pendingWrap');
-  const ownerSelect = document.getElementById('ownerSelect');
+  const ownerSelectFilter = document.getElementById('ownerStatusFilter');
+  const ownerSearch = document.getElementById('ownerSearch');
+  const ownerList = document.getElementById('ownerList');
+  const ownerAudit = document.getElementById('ownerAudit');
   const createOwnerMsg = document.getElementById('createOwnerMsg');
-  const resetMsg = document.getElementById('resetMsg');
+  const createMode = document.getElementById('createMode');
+  const tempPasswordField = document.getElementById('tempPasswordField');
+  const copyInviteBtn = document.getElementById('copyInviteBtn');
+  const latestInviteLink = document.getElementById('latestInviteLink');
+  let owners = [];
 
   function setMsg(el, text, bad) {
     el.textContent = text || '';
-    el.style.color = bad ? '#ffd8de' : 'var(--muted)';
+    el.style.color = bad ? '#782532' : 'var(--color-muted)';
   }
 
   function formatLocalDateTime(value){
     if(window.TBMReservationUI){ return window.TBMReservationUI.formatLocalIsoDisplay(value); }
     return String(value || '').slice(0,16).replace('T',' ');
+  }
+
+  function ownerPassesFilter(owner){
+    const q = (ownerSearch.value || '').trim().toLowerCase();
+    const status = ownerSelectFilter.value;
+    if(q){
+      const hay = `${owner.name || ''} ${owner.email || ''}`.toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    if(status === 'all') return true;
+    if(status === 'active') return !owner.is_disabled;
+    if(status === 'disabled') return !!owner.is_disabled;
+    if(status === 'must_reset') return !!owner.must_reset_password;
+    if(status === 'invite_open') return owner.invite_status === 'open';
+    return true;
+  }
+
+  function ownerChips(owner){
+    const chips = [];
+    chips.push(`<span class="chip ${owner.is_disabled ? 'bad' : 'good'}">${owner.is_disabled ? 'Disabled' : 'Active'}</span>`);
+    if(owner.must_reset_password) chips.push('<span class="chip warn">Must Reset Password</span>');
+    if(owner.invite_status === 'open') chips.push('<span class="chip warn">Invite Open</span>');
+    if(owner.invite_status === 'expired') chips.push('<span class="chip">Invite Expired</span>');
+    if(owner.invite_status === 'revoked') chips.push('<span class="chip">Invite Revoked</span>');
+    return chips.join('');
   }
 
   async function loadPending() {
@@ -101,14 +156,50 @@
     });
   }
 
-  async function refreshOwners() {
+  async function loadOwners(){
     const resp = await fetch('/api/owners');
-    if (!resp.ok) return;
-    const owners = await resp.json();
-    ownerSelect.innerHTML = owners
-      .map((owner) => `<option value="${owner.id}">${owner.name} (${owner.email})</option>`)
-      .join('');
-    if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
+    if(!resp.ok){ ownerList.innerHTML = '<div class="muted">Could not load owners.</div>'; return; }
+    owners = await resp.json();
+    renderOwners();
+  }
+
+  function renderOwners(){
+    const rows = owners.filter(ownerPassesFilter);
+    if(!rows.length){ ownerList.innerHTML = '<div class="muted">No owners match filter.</div>'; return; }
+    ownerList.innerHTML = rows.map((owner)=>`
+      <article class="ownerCard">
+        <div class="ownerTop">
+          <div>
+            <div class="ownerName">${owner.name}</div>
+            <div class="ownerMeta">${owner.email}</div>
+            <div class="ownerMeta">Last login: ${owner.last_login_at ? formatLocalDateTime(owner.last_login_at) : 'Never'}</div>
+            <div class="statusChips">${ownerChips(owner)}</div>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn" data-owner-action="${owner.is_disabled ? 'enable' : 'disable'}" data-owner-id="${owner.id}">${owner.is_disabled ? 'Enable' : 'Disable'}</button>
+          <button class="btn" data-owner-action="force-reset" data-owner-id="${owner.id}">Force Password Reset</button>
+          <button class="btn" data-owner-action="resend-invite" data-owner-id="${owner.id}">Resend Invite</button>
+          <button class="btn" data-owner-action="revoke-invite" data-owner-id="${owner.id}">Revoke Invite</button>
+          <button class="btn" data-owner-action="admin-reset" data-owner-id="${owner.id}">Set Temp Password</button>
+        </div>
+        ${owner.invite_link ? `<div class="ownerMeta">Invite: <a href="${owner.invite_link}" target="_blank" rel="noopener">${owner.invite_link}</a></div>` : ''}
+      </article>
+    `).join('');
+  }
+
+  async function loadAudit(){
+    const resp = await fetch('/api/admin/owners/audit?page=1&page_size=20');
+    if(!resp.ok){ ownerAudit.innerHTML = '<div class="muted">Could not load audit events.</div>'; return; }
+    const data = await resp.json();
+    const items = data.items || [];
+    if(!items.length){ ownerAudit.innerHTML = '<div class="muted">No owner audit events yet.</div>'; return; }
+    ownerAudit.innerHTML = items.map((item)=>`
+      <div class="auditItem">
+        <div><strong>${item.action}</strong> - ${item.owner_name} (${item.owner_email})</div>
+        <div class="muted">${formatLocalDateTime(item.created_at)} by ${item.actor_name}</div>
+      </div>
+    `).join('');
   }
 
   pendingWrap.addEventListener('click', async (event) => {
@@ -119,11 +210,7 @@
     if (!action || !id) return;
     const endpoint = action === 'approve' ? `/api/reservations/${id}/approve` : `/api/reservations/${id}/deny`;
     const payload = action === 'deny' ? { note: 'Denied by admin' } : {};
-    const resp = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const resp = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
       alert(data.error || 'Action failed');
@@ -132,44 +219,79 @@
     loadPending();
   });
 
+  createMode.addEventListener('change', () => {
+    tempPasswordField.style.display = createMode.value === 'temp_password' ? '' : 'none';
+  });
+
   document.getElementById('createOwnerBtn').addEventListener('click', async () => {
     const payload = {
+      mode: createMode.value,
       name: document.getElementById('ownerName').value.trim(),
       email: document.getElementById('ownerEmail').value.trim(),
-      password: document.getElementById('ownerPassword').value
+      password: document.getElementById('ownerPassword').value,
     };
-    const resp = await fetch('/api/owners', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const resp = await fetch('/api/owners', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      setMsg(createOwnerMsg, data.error || 'Create failed', true);
-      return;
+    if(!resp.ok){ setMsg(createOwnerMsg, data.error || 'Create failed', true); return; }
+    if(data.invite && data.invite.link){
+      latestInviteLink.value = data.invite.link;
+      copyInviteBtn.style.display = '';
+      setMsg(createOwnerMsg, `Owner created with invite.\n${data.invite.link}`);
+    } else {
+      latestInviteLink.value = '';
+      copyInviteBtn.style.display = 'none';
+      setMsg(createOwnerMsg, 'Owner created with temporary password.');
     }
-    setMsg(createOwnerMsg, 'Owner created.');
-    await refreshOwners();
+    await loadOwners();
+    await loadAudit();
   });
 
-  document.getElementById('resetOwnerBtn').addEventListener('click', async () => {
-    const userId = ownerSelect.value;
-    const password = document.getElementById('resetPassword').value;
-    const resp = await fetch(`/api/owners/${userId}/reset-password`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password })
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      setMsg(resetMsg, data.error || 'Reset failed', true);
-      return;
+  copyInviteBtn.addEventListener('click', async () => {
+    const text = latestInviteLink.value || '';
+    if(!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setMsg(createOwnerMsg, `Invite link copied.\n${text}`);
+    } catch {
+      setMsg(createOwnerMsg, `Copy failed.\n${text}`, true);
     }
-    setMsg(resetMsg, 'Password reset.');
   });
+
+  ownerList.addEventListener('click', async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const action = target.getAttribute('data-owner-action');
+    const id = target.getAttribute('data-owner-id');
+    if(!action || !id) return;
+    let endpoint = '';
+    let payload = {};
+    if(action === 'enable') endpoint = `/api/owners/${id}/enable`;
+    if(action === 'disable') endpoint = `/api/owners/${id}/disable`;
+    if(action === 'force-reset') endpoint = `/api/owners/${id}/force-password-reset`;
+    if(action === 'resend-invite') endpoint = `/api/owners/${id}/invites`;
+    if(action === 'revoke-invite') endpoint = `/api/owners/${id}/invites/revoke`;
+    if(action === 'admin-reset'){
+      const password = window.prompt('Set temporary password (8+ chars):', 'OwnerTemp123!') || '';
+      if(!password) return;
+      endpoint = `/api/owners/${id}/reset-password`;
+      payload = { password };
+    }
+    if(!endpoint) return;
+    const resp = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok){ alert(data.error || 'Owner action failed.'); return; }
+    await loadOwners();
+    await loadAudit();
+  });
+
+  ownerSearch.addEventListener('input', renderOwners);
+  ownerSelectFilter.addEventListener('change', renderOwners);
 
   if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(document); }
+  createMode.dispatchEvent(new Event('change'));
   loadPending();
+  loadOwners();
+  loadAudit();
 })();
 </script>
 {% endblock %}

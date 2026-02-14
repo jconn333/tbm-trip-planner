@@ -25,9 +25,18 @@ def create_auth_blueprint(*, app_name: str, db_conn, serialize_user, json_error)
             return render_template("login.html", app_name=app_name, error="Email and password are required."), 400
         with db_conn() as conn:
             user = storage.get_user_by_email(conn, email)
-        if not user or not verify_password(user["password_hash"], password):
+            if not user or not verify_password(user["password_hash"], password):
+                user = None
+            elif user["role"] == "owner" and int(user["is_disabled"]) == 1:
+                return render_template("login.html", app_name=app_name, error="This account is disabled. Contact an admin."), 403
+            if user:
+                storage.set_user_flags(conn, int(user["id"]), last_login_at_utc=storage.utc_now_iso())
+                user = storage.get_user_by_id(conn, int(user["id"]))
+        if not user:
             return render_template("login.html", app_name=app_name, error="Invalid email or password."), 401
         login_user(int(user["id"]))
+        if user["role"] == "owner" and int(user["must_reset_password"]) == 1:
+            return redirect(url_for("account_page", force_reset=1))
         target = request.args.get("next") or url_for("calendar_page")
         return redirect(target)
 
@@ -45,9 +54,18 @@ def create_auth_blueprint(*, app_name: str, db_conn, serialize_user, json_error)
             return json_error("email and password are required.", 400, "invalid_credentials")
         with db_conn() as conn:
             user = storage.get_user_by_email(conn, email)
-        if not user or not verify_password(user["password_hash"], password):
+            if not user or not verify_password(user["password_hash"], password):
+                user = None
+            elif user["role"] == "owner" and int(user["is_disabled"]) == 1:
+                return json_error("This account is disabled. Contact an admin.", 403, "owner_disabled")
+            if user:
+                storage.set_user_flags(conn, int(user["id"]), last_login_at_utc=storage.utc_now_iso())
+                user = storage.get_user_by_id(conn, int(user["id"]))
+        if not user:
             return json_error("Invalid email or password.", 401, "invalid_credentials")
         login_user(int(user["id"]))
+        if user["role"] == "owner" and int(user["must_reset_password"]) == 1:
+            return jsonify({"ok": True, "must_reset_password": True, "user": serialize_user(user)}), 409
         return jsonify({"ok": True, "user": serialize_user(user)})
 
     @bp.post("/api/logout", endpoint="api_logout")

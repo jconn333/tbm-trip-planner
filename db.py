@@ -149,6 +149,60 @@ def migrate_if_needed(conn: sqlite3.Connection) -> None:
             PRAGMA user_version = 4;
             """
         )
+        version = 4
+
+    if version < 5:
+        user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "is_disabled" not in user_columns:
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN is_disabled INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+        if "must_reset_password" not in user_columns:
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN must_reset_password INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+        if "last_login_at_utc" not in user_columns:
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN last_login_at_utc TEXT")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS owner_invites (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                token TEXT NOT NULL UNIQUE,
+                status TEXT NOT NULL CHECK(status IN ('open','consumed','revoked','expired')),
+                expires_at_utc TEXT NOT NULL,
+                created_by_user_id INTEGER REFERENCES users(id),
+                created_at_utc TEXT NOT NULL,
+                consumed_at_utc TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_owner_invites_user_status ON owner_invites(user_id, status);
+            CREATE INDEX IF NOT EXISTS idx_owner_invites_expires ON owner_invites(expires_at_utc);
+
+            CREATE TABLE IF NOT EXISTS owner_audit_events (
+                id INTEGER PRIMARY KEY,
+                owner_user_id INTEGER NOT NULL REFERENCES users(id),
+                action TEXT NOT NULL,
+                actor_user_id INTEGER REFERENCES users(id),
+                metadata_json TEXT,
+                created_at_utc TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_owner_audit_owner_created ON owner_audit_events(owner_user_id, created_at_utc DESC);
+            CREATE INDEX IF NOT EXISTS idx_owner_audit_action_created ON owner_audit_events(action, created_at_utc DESC);
+
+            PRAGMA user_version = 5;
+            """
+        )
 
 
 def seed_settings_defaults(conn: sqlite3.Connection, defaults: dict[str, str]) -> None:
@@ -280,11 +334,207 @@ def set_user_password(conn: sqlite3.Connection, user_id: int, password_hash: str
     conn.commit()
 
 
+def set_user_flags(
+    conn: sqlite3.Connection,
+    user_id: int,
+    *,
+    is_disabled: int | None = None,
+    must_reset_password: int | None = None,
+    last_login_at_utc: str | None = None,
+):
+    fields: list[str] = []
+    values: list[object] = []
+    if is_disabled is not None:
+        fields.append("is_disabled = ?")
+        values.append(1 if int(is_disabled) else 0)
+    if must_reset_password is not None:
+        fields.append("must_reset_password = ?")
+        values.append(1 if int(must_reset_password) else 0)
+    if last_login_at_utc is not None:
+        fields.append("last_login_at_utc = ?")
+        values.append(last_login_at_utc)
+    if not fields:
+        return
+    values.append(int(user_id))
+    conn.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", tuple(values))
+    conn.commit()
+
+
 def ensure_bootstrap_admin(conn: sqlite3.Connection, *, email: str, name: str, password_hash: str):
     existing_admin = conn.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1").fetchone()
     if existing_admin:
         return None
     return create_user(conn, email=email, name=name, role="admin", password_hash=password_hash)
+
+
+def expire_open_owner_invites(conn: sqlite3.Connection, *, now_utc: str):
+    conn.execute(
+        """
+        UPDATE owner_invites
+        SET status = 'expired'
+        WHERE status = 'open'
+          AND expires_at_utc <= ?
+        """,
+        (now_utc,),
+    )
+    conn.commit()
+
+
+def revoke_open_owner_invites_for_user(conn: sqlite3.Connection, *, user_id: int):
+    conn.execute(
+        """
+        UPDATE owner_invites
+        SET status = 'revoked'
+        WHERE user_id = ?
+          AND status = 'open'
+        """,
+        (int(user_id),),
+    )
+    conn.commit()
+
+
+def create_owner_invite(
+    conn: sqlite3.Connection,
+    *,
+    user_id: int,
+    token: str,
+    expires_at_utc: str,
+    created_by_user_id: int | None,
+):
+    now = utc_now_iso()
+    cur = conn.execute(
+        """
+        INSERT INTO owner_invites (
+            user_id, token, status, expires_at_utc, created_by_user_id, created_at_utc, consumed_at_utc
+        ) VALUES (?, ?, 'open', ?, ?, ?, NULL)
+        """,
+        (int(user_id), token, expires_at_utc, created_by_user_id, now),
+    )
+    conn.commit()
+    return get_owner_invite_by_id(conn, int(cur.lastrowid))
+
+
+def get_owner_invite_by_id(conn: sqlite3.Connection, invite_id: int):
+    return conn.execute(
+        """
+        SELECT oi.*
+        FROM owner_invites oi
+        WHERE oi.id = ?
+        """,
+        (int(invite_id),),
+    ).fetchone()
+
+
+def get_owner_invite_by_token(conn: sqlite3.Connection, token: str):
+    return conn.execute(
+        """
+        SELECT oi.*
+        FROM owner_invites oi
+        WHERE oi.token = ?
+        """,
+        (token,),
+    ).fetchone()
+
+
+def get_latest_owner_invite_for_user(conn: sqlite3.Connection, *, user_id: int):
+    return conn.execute(
+        """
+        SELECT oi.*
+        FROM owner_invites oi
+        WHERE oi.user_id = ?
+        ORDER BY oi.created_at_utc DESC, oi.id DESC
+        LIMIT 1
+        """,
+        (int(user_id),),
+    ).fetchone()
+
+
+def get_open_owner_invite_for_user(conn: sqlite3.Connection, *, user_id: int):
+    return conn.execute(
+        """
+        SELECT oi.*
+        FROM owner_invites oi
+        WHERE oi.user_id = ?
+          AND oi.status = 'open'
+        ORDER BY oi.created_at_utc DESC, oi.id DESC
+        LIMIT 1
+        """,
+        (int(user_id),),
+    ).fetchone()
+
+
+def update_owner_invite_fields(conn: sqlite3.Connection, invite_id: int, fields: dict[str, object]):
+    if not fields:
+        return get_owner_invite_by_id(conn, int(invite_id))
+    keys = list(fields.keys())
+    values = [fields[k] for k in keys]
+    assignments = ", ".join(f"{k} = ?" for k in keys)
+    values.append(int(invite_id))
+    conn.execute(f"UPDATE owner_invites SET {assignments} WHERE id = ?", tuple(values))
+    conn.commit()
+    return get_owner_invite_by_id(conn, int(invite_id))
+
+
+def create_owner_audit_event(
+    conn: sqlite3.Connection,
+    *,
+    owner_user_id: int,
+    action: str,
+    actor_user_id: int | None,
+    metadata_json: str | None = None,
+):
+    now = utc_now_iso()
+    conn.execute(
+        """
+        INSERT INTO owner_audit_events (owner_user_id, action, actor_user_id, metadata_json, created_at_utc)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (int(owner_user_id), str(action), actor_user_id, metadata_json, now),
+    )
+    conn.commit()
+
+
+def list_owner_audit_events(
+    conn: sqlite3.Connection,
+    *,
+    owner_user_id: int | None,
+    action: str | None,
+    page: int,
+    page_size: int,
+):
+    where = ["1=1"]
+    params: list[object] = []
+    if owner_user_id:
+        where.append("ev.owner_user_id = ?")
+        params.append(int(owner_user_id))
+    if action:
+        where.append("ev.action = ?")
+        params.append(str(action))
+    where_sql = " AND ".join(where)
+
+    total = conn.execute(
+        f"SELECT COUNT(1) FROM owner_audit_events ev WHERE {where_sql}",
+        tuple(params),
+    ).fetchone()[0]
+    offset = (max(1, int(page)) - 1) * int(page_size)
+    rows = conn.execute(
+        f"""
+        SELECT
+          ev.*,
+          o.name AS owner_name,
+          o.email AS owner_email,
+          a.name AS actor_name,
+          a.email AS actor_email
+        FROM owner_audit_events ev
+        JOIN users o ON o.id = ev.owner_user_id
+        LEFT JOIN users a ON a.id = ev.actor_user_id
+        WHERE {where_sql}
+        ORDER BY ev.created_at_utc DESC, ev.id DESC
+        LIMIT ? OFFSET ?
+        """,
+        tuple([*params, int(page_size), int(offset)]),
+    ).fetchall()
+    return {"total": int(total), "rows": rows}
 
 
 def overlap_exists(
