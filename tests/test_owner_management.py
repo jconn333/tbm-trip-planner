@@ -1,5 +1,8 @@
+import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
+import pytest
 
 import app as tbm_app
 import db as storage
@@ -29,12 +32,15 @@ def _login(client, email: str, password: str):
     return response
 
 
-def _setup_env(tmp_path, monkeypatch):
-    db_path = tmp_path / "test_owner_mgmt.sqlite3"
-    monkeypatch.setattr(tbm_app, "TBM_DB_PATH", str(db_path))
+def _setup_env(monkeypatch):
+    db_url = os.environ.get("TEST_DATABASE_URL") or tbm_app.DATABASE_URL
+    if not db_url:
+        pytest.skip("Set TEST_DATABASE_URL (or DATABASE_URL) for Postgres-backed tests.")
+    monkeypatch.setattr(tbm_app, "DATABASE_URL", db_url)
     monkeypatch.setattr(tbm_app, "TBM_HOME_TZ", "America/New_York")
-    storage.init_db(str(db_path))
-    with storage.get_conn(str(db_path)) as conn:
+    storage.init_db(db_url)
+    with storage.get_conn(db_url) as conn:
+        storage.reset_for_tests(conn)
         storage.seed_settings_defaults(conn, tbm_app._default_runtime_settings())
         storage.create_user(
             conn,
@@ -53,7 +59,7 @@ def _setup_env(tmp_path, monkeypatch):
 
 
 def test_create_owner_invite_and_accept_flow(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin = tbm_app.app.test_client()
     assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
 
@@ -86,7 +92,7 @@ def test_create_owner_invite_and_accept_flow(tmp_path, monkeypatch):
 
 
 def test_temp_password_requires_reset_and_can_be_cleared(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin = tbm_app.app.test_client()
     assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
 
@@ -128,11 +134,11 @@ def test_temp_password_requires_reset_and_can_be_cleared(tmp_path, monkeypatch):
 
 
 def test_disable_owner_blocks_login_and_enable_restores(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin = tbm_app.app.test_client()
     assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
 
-    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+    with storage.get_conn(tbm_app.DATABASE_URL) as conn:
         owner = storage.get_user_by_email(conn, "owner@example.com")
         owner_id = int(owner["id"])
 
@@ -151,7 +157,7 @@ def test_disable_owner_blocks_login_and_enable_restores(tmp_path, monkeypatch):
 
 
 def test_owner_list_includes_status_fields_and_audit(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin = tbm_app.app.test_client()
     assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
 
@@ -177,14 +183,14 @@ def test_owner_list_includes_status_fields_and_audit(tmp_path, monkeypatch):
 
 
 def test_revoke_and_resend_invite_flow(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin = tbm_app.app.test_client()
     assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
 
     created = admin.post("/api/owners", json={"name": "Rev Owner", "email": "rev@example.com"})
     assert created.status_code == 201
 
-    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+    with storage.get_conn(tbm_app.DATABASE_URL) as conn:
         owner = storage.get_user_by_email(conn, "rev@example.com")
         owner_id = int(owner["id"])
 
@@ -196,14 +202,14 @@ def test_revoke_and_resend_invite_flow(tmp_path, monkeypatch):
     data = resent.get_json()
     assert data["invite"]["link"]
 
-    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+    with storage.get_conn(tbm_app.DATABASE_URL) as conn:
         storage.expire_open_owner_invites(conn, now_utc=(datetime.now(ZoneInfo("UTC")) + timedelta(days=3)).isoformat())
         invite = storage.get_latest_owner_invite_for_user(conn, user_id=owner_id)
         assert invite["status"] in ("expired", "revoked", "consumed", "open")
 
 
 def test_admin_can_update_owner_name_and_email(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin = tbm_app.app.test_client()
     assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
 
@@ -222,7 +228,7 @@ def test_admin_can_update_owner_name_and_email(tmp_path, monkeypatch):
 
 
 def test_admin_update_owner_email_rejects_duplicate(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin = tbm_app.app.test_client()
     assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
 
@@ -238,11 +244,11 @@ def test_admin_update_owner_email_rejects_duplicate(tmp_path, monkeypatch):
 
 
 def test_admin_can_start_and_stop_view_as_owner(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin = tbm_app.app.test_client()
     assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
 
-    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+    with storage.get_conn(tbm_app.DATABASE_URL) as conn:
         owner = storage.get_user_by_email(conn, "owner@example.com")
         owner_id = int(owner["id"])
 
@@ -283,11 +289,11 @@ def test_admin_can_start_and_stop_view_as_owner(tmp_path, monkeypatch):
 
 
 def test_non_admin_cannot_start_view_as(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     owner_client = tbm_app.app.test_client()
     assert _login(owner_client, "owner@example.com", "ownerpass123").status_code == 200
 
-    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+    with storage.get_conn(tbm_app.DATABASE_URL) as conn:
         owner = storage.get_user_by_email(conn, "owner@example.com")
         owner_id = int(owner["id"])
 
@@ -296,11 +302,11 @@ def test_non_admin_cannot_start_view_as(tmp_path, monkeypatch):
 
 
 def test_view_as_rejects_non_owner_target(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin = tbm_app.app.test_client()
     assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
 
-    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+    with storage.get_conn(tbm_app.DATABASE_URL) as conn:
         admin_user = storage.get_user_by_email(conn, "admin@example.com")
         admin_id = int(admin_user["id"])
 
@@ -310,11 +316,11 @@ def test_view_as_rejects_non_owner_target(tmp_path, monkeypatch):
 
 
 def test_view_as_audit_records_start_and_stop(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin = tbm_app.app.test_client()
     assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
 
-    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+    with storage.get_conn(tbm_app.DATABASE_URL) as conn:
         owner = storage.get_user_by_email(conn, "owner@example.com")
         owner_id = int(owner["id"])
 
@@ -329,11 +335,11 @@ def test_view_as_audit_records_start_and_stop(tmp_path, monkeypatch):
 
 
 def test_view_as_allows_disabled_and_must_reset_owner_with_warning(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin = tbm_app.app.test_client()
     assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
 
-    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+    with storage.get_conn(tbm_app.DATABASE_URL) as conn:
         user = storage.create_user(
             conn,
             email="locked@example.com",
@@ -356,11 +362,11 @@ def test_view_as_allows_disabled_and_must_reset_owner_with_warning(tmp_path, mon
 
 
 def test_admin_email_logs_endpoint_returns_rows(tmp_path, monkeypatch):
-    _setup_env(tmp_path, monkeypatch)
+    _setup_env(monkeypatch)
     admin = tbm_app.app.test_client()
     assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
 
-    with storage.get_conn(tbm_app.TBM_DB_PATH) as conn:
+    with storage.get_conn(tbm_app.DATABASE_URL) as conn:
         admin_row = storage.get_user_by_email(conn, "admin@example.com")
         storage.create_email_notification_log(
             conn,

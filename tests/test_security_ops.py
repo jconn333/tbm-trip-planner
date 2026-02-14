@@ -1,15 +1,21 @@
+import os
 from datetime import datetime, timedelta
+
+import pytest
 
 import app as tbm_app
 import db as storage
 from auth import hash_password
 
 
-def _setup_users(tmp_path, monkeypatch):
-    db_path = tmp_path / "test_security.sqlite3"
-    monkeypatch.setattr(tbm_app, "TBM_DB_PATH", str(db_path))
-    storage.init_db(str(db_path))
-    with storage.get_conn(str(db_path)) as conn:
+def _setup_users(monkeypatch):
+    db_url = os.environ.get("TEST_DATABASE_URL") or tbm_app.DATABASE_URL
+    if not db_url:
+        pytest.skip("Set TEST_DATABASE_URL (or DATABASE_URL) for Postgres-backed tests.")
+    monkeypatch.setattr(tbm_app, "DATABASE_URL", db_url)
+    storage.init_db(db_url)
+    with storage.get_conn(db_url) as conn:
+        storage.reset_for_tests(conn)
         storage.seed_settings_defaults(conn, tbm_app._default_runtime_settings())
         storage.create_user(
             conn,
@@ -35,7 +41,7 @@ def test_response_has_request_id_header():
 
 
 def test_csrf_required_for_authenticated_mutation(tmp_path, monkeypatch):
-    _setup_users(tmp_path, monkeypatch)
+    _setup_users(monkeypatch)
     monkeypatch.setattr(tbm_app, "ENABLE_RATE_LIMIT", False)
     tbm_app._RATE_LIMIT_BUCKETS.clear()
     client = tbm_app.app.test_client()
@@ -58,7 +64,7 @@ def test_csrf_required_for_authenticated_mutation(tmp_path, monkeypatch):
 
 
 def test_login_rate_limit(tmp_path, monkeypatch):
-    _setup_users(tmp_path, monkeypatch)
+    _setup_users(monkeypatch)
     monkeypatch.setattr(tbm_app, "ENABLE_RATE_LIMIT", True)
     tbm_app._RATE_LIMIT_BUCKETS.clear()
     monkeypatch.setitem(tbm_app.RATE_LIMIT_RULES, "api_login", (2, 60))

@@ -1,3 +1,4 @@
+import os
 import pytest
 
 import app as tbm_app
@@ -7,12 +8,15 @@ from auth import hash_password
 
 @pytest.fixture
 def live_env(tmp_path, monkeypatch):
-    db_path = tmp_path / "test_live_tracking.sqlite3"
-    monkeypatch.setattr(tbm_app, "TBM_DB_PATH", str(db_path))
+    db_url = os.environ.get("TEST_DATABASE_URL") or tbm_app.DATABASE_URL
+    if not db_url:
+        pytest.skip("Set TEST_DATABASE_URL (or DATABASE_URL) for Postgres-backed tests.")
+    monkeypatch.setattr(tbm_app, "DATABASE_URL", db_url)
     monkeypatch.setattr(tbm_app, "TBM_HOME_TZ", "America/New_York")
     monkeypatch.setattr(tbm_app, "LIVE_TRACKING_TAIL", "N656W")
-    storage.init_db(str(db_path))
-    with storage.get_conn(str(db_path)) as conn:
+    storage.init_db(db_url)
+    with storage.get_conn(db_url) as conn:
+        storage.reset_for_tests(conn)
         storage.create_user(
             conn,
             email="owner@example.com",

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-import sqlite3
+from typing import Any
+
+import psycopg
+from psycopg.rows import dict_row
 from datetime import datetime, timezone
 from typing import Iterable
 
@@ -14,30 +17,85 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _connect(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+def _connect(db_url: str) -> Any:
+    conn = psycopg.connect(db_url, row_factory=dict_row)
     return conn
 
 
-def get_conn(db_path: str) -> sqlite3.Connection:
-    return _connect(db_path)
+def get_conn(db_url: str) -> Any:
+    return _connect(db_url)
 
 
-def init_db(db_path: str) -> None:
-    with _connect(db_path) as conn:
+def init_db(db_url: str) -> None:
+    with _connect(db_url) as conn:
         migrate_if_needed(conn)
 
 
-def migrate_if_needed(conn: sqlite3.Connection) -> None:
-    version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+def _exec_script(conn: Any, script: str) -> None:
+    for statement in [chunk.strip() for chunk in script.split(";") if chunk.strip()]:
+        conn.execute(statement)
+    conn.commit()
+
+
+def _ensure_schema_migrations(conn: Any) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            id SMALLINT PRIMARY KEY CHECK (id = 1),
+            version INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO schema_migrations (id, version)
+        VALUES (1, 0)
+        ON CONFLICT (id) DO NOTHING
+        """
+    )
+    conn.commit()
+
+
+def get_schema_version(conn: Any) -> int:
+    _ensure_schema_migrations(conn)
+    row = conn.execute("SELECT version FROM schema_migrations WHERE id = 1").fetchone()
+    return int(row["version"] if row else 0)
+
+
+def _set_schema_version(conn: Any, version: int) -> None:
+    conn.execute("UPDATE schema_migrations SET version = %s WHERE id = 1", (int(version),))
+    conn.commit()
+
+
+def reset_for_tests(conn: Any) -> None:
+    conn.execute(
+        """
+        TRUNCATE TABLE
+            planner_quote_drafts,
+            reservation_change_requests,
+            reservations,
+            email_notification_logs,
+            owner_audit_events,
+            owner_invites,
+            settings_audit_log,
+            app_settings,
+            users
+        RESTART IDENTITY CASCADE
+        """
+    )
+    conn.commit()
+
+
+def migrate_if_needed(conn: Any) -> None:
+    _ensure_schema_migrations(conn)
+    version = get_schema_version(conn)
 
     if version < 1:
-        conn.executescript(
+        _exec_script(
+            conn,
             """
             CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY,
+                id BIGSERIAL PRIMARY KEY,
                 email TEXT NOT NULL UNIQUE,
                 name TEXT NOT NULL,
                 role TEXT NOT NULL CHECK(role IN ('admin', 'owner')),
@@ -46,7 +104,7 @@ def migrate_if_needed(conn: sqlite3.Connection) -> None:
             );
 
             CREATE TABLE IF NOT EXISTS reservations (
-                id INTEGER PRIMARY KEY,
+                id BIGSERIAL PRIMARY KEY,
                 status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'denied', 'canceled')),
                 start_utc TEXT NOT NULL,
                 end_utc TEXT NOT NULL,
@@ -66,14 +124,14 @@ def migrate_if_needed(conn: sqlite3.Connection) -> None:
             CREATE INDEX IF NOT EXISTS idx_res_end ON reservations(end_utc);
             CREATE INDEX IF NOT EXISTS idx_res_status ON reservations(status);
             CREATE INDEX IF NOT EXISTS idx_res_traveling_user ON reservations(traveling_user_id);
-
-            PRAGMA user_version = 1;
             """
         )
+        _set_schema_version(conn, 1)
         version = 1
 
     if version < 2:
-        conn.executescript(
+        _exec_script(
+            conn,
             """
             CREATE TABLE IF NOT EXISTS app_settings (
                 key TEXT PRIMARY KEY,
@@ -83,7 +141,7 @@ def migrate_if_needed(conn: sqlite3.Connection) -> None:
             );
 
             CREATE TABLE IF NOT EXISTS reservation_change_requests (
-                id INTEGER PRIMARY KEY,
+                id BIGSERIAL PRIMARY KEY,
                 reservation_id INTEGER NOT NULL REFERENCES reservations(id),
                 requested_by_user_id INTEGER NOT NULL REFERENCES users(id),
                 status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'denied', 'applied', 'canceled')),
@@ -102,17 +160,17 @@ def migrate_if_needed(conn: sqlite3.Connection) -> None:
             CREATE INDEX IF NOT EXISTS idx_change_req_reservation ON reservation_change_requests(reservation_id);
             CREATE INDEX IF NOT EXISTS idx_change_req_status ON reservation_change_requests(status);
             CREATE INDEX IF NOT EXISTS idx_change_req_requested_by ON reservation_change_requests(requested_by_user_id);
-
-            PRAGMA user_version = 2;
             """
         )
+        _set_schema_version(conn, 2)
         version = 2
 
     if version < 3:
-        conn.executescript(
+        _exec_script(
+            conn,
             """
             CREATE TABLE IF NOT EXISTS settings_audit_log (
-                id INTEGER PRIMARY KEY,
+                id BIGSERIAL PRIMARY KEY,
                 key TEXT NOT NULL,
                 old_value TEXT,
                 new_value TEXT,
@@ -122,17 +180,17 @@ def migrate_if_needed(conn: sqlite3.Connection) -> None:
 
             CREATE INDEX IF NOT EXISTS idx_settings_audit_key ON settings_audit_log(key);
             CREATE INDEX IF NOT EXISTS idx_settings_audit_changed_at ON settings_audit_log(changed_at_utc DESC);
-
-            PRAGMA user_version = 3;
             """
         )
+        _set_schema_version(conn, 3)
         version = 3
 
     if version < 4:
-        conn.executescript(
+        _exec_script(
+            conn,
             """
             CREATE TABLE IF NOT EXISTS planner_quote_drafts (
-                id INTEGER PRIMARY KEY,
+                id BIGSERIAL PRIMARY KEY,
                 token TEXT NOT NULL UNIQUE,
                 user_id INTEGER NOT NULL REFERENCES users(id),
                 status TEXT NOT NULL CHECK(status IN ('open', 'consumed', 'expired')),
@@ -145,37 +203,34 @@ def migrate_if_needed(conn: sqlite3.Connection) -> None:
             CREATE INDEX IF NOT EXISTS idx_planner_drafts_token ON planner_quote_drafts(token);
             CREATE INDEX IF NOT EXISTS idx_planner_drafts_user_status ON planner_quote_drafts(user_id, status);
             CREATE INDEX IF NOT EXISTS idx_planner_drafts_expires ON planner_quote_drafts(expires_at_utc);
-
-            PRAGMA user_version = 4;
             """
         )
+        _set_schema_version(conn, 4)
         version = 4
 
     if version < 5:
-        user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        user_columns = {
+            row["column_name"]
+            for row in conn.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'users'
+                """
+            ).fetchall()
+        }
         if "is_disabled" not in user_columns:
-            try:
-                conn.execute("ALTER TABLE users ADD COLUMN is_disabled INTEGER NOT NULL DEFAULT 0")
-            except sqlite3.OperationalError as exc:
-                if "duplicate column name" not in str(exc).lower():
-                    raise
+            conn.execute("ALTER TABLE users ADD COLUMN is_disabled INTEGER NOT NULL DEFAULT 0")
         if "must_reset_password" not in user_columns:
-            try:
-                conn.execute("ALTER TABLE users ADD COLUMN must_reset_password INTEGER NOT NULL DEFAULT 0")
-            except sqlite3.OperationalError as exc:
-                if "duplicate column name" not in str(exc).lower():
-                    raise
+            conn.execute("ALTER TABLE users ADD COLUMN must_reset_password INTEGER NOT NULL DEFAULT 0")
         if "last_login_at_utc" not in user_columns:
-            try:
-                conn.execute("ALTER TABLE users ADD COLUMN last_login_at_utc TEXT")
-            except sqlite3.OperationalError as exc:
-                if "duplicate column name" not in str(exc).lower():
-                    raise
+            conn.execute("ALTER TABLE users ADD COLUMN last_login_at_utc TEXT")
 
-        conn.executescript(
+        _exec_script(
+            conn,
             """
             CREATE TABLE IF NOT EXISTS owner_invites (
-                id INTEGER PRIMARY KEY,
+                id BIGSERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES users(id),
                 token TEXT NOT NULL UNIQUE,
                 status TEXT NOT NULL CHECK(status IN ('open','consumed','revoked','expired')),
@@ -189,7 +244,7 @@ def migrate_if_needed(conn: sqlite3.Connection) -> None:
             CREATE INDEX IF NOT EXISTS idx_owner_invites_expires ON owner_invites(expires_at_utc);
 
             CREATE TABLE IF NOT EXISTS owner_audit_events (
-                id INTEGER PRIMARY KEY,
+                id BIGSERIAL PRIMARY KEY,
                 owner_user_id INTEGER NOT NULL REFERENCES users(id),
                 action TEXT NOT NULL,
                 actor_user_id INTEGER REFERENCES users(id),
@@ -199,17 +254,17 @@ def migrate_if_needed(conn: sqlite3.Connection) -> None:
 
             CREATE INDEX IF NOT EXISTS idx_owner_audit_owner_created ON owner_audit_events(owner_user_id, created_at_utc DESC);
             CREATE INDEX IF NOT EXISTS idx_owner_audit_action_created ON owner_audit_events(action, created_at_utc DESC);
-
-            PRAGMA user_version = 5;
             """
         )
+        _set_schema_version(conn, 5)
         version = 5
 
     if version < 6:
-        conn.executescript(
+        _exec_script(
+            conn,
             """
             CREATE TABLE IF NOT EXISTS email_notification_logs (
-                id INTEGER PRIMARY KEY,
+                id BIGSERIAL PRIMARY KEY,
                 audience TEXT NOT NULL,
                 source TEXT NOT NULL,
                 to_addresses TEXT NOT NULL,
@@ -224,37 +279,36 @@ def migrate_if_needed(conn: sqlite3.Connection) -> None:
             CREATE INDEX IF NOT EXISTS idx_email_logs_created ON email_notification_logs(created_at_utc DESC);
             CREATE INDEX IF NOT EXISTS idx_email_logs_status_created ON email_notification_logs(status, created_at_utc DESC);
             CREATE INDEX IF NOT EXISTS idx_email_logs_audience_created ON email_notification_logs(audience, created_at_utc DESC);
-
-            PRAGMA user_version = 6;
             """
         )
+        _set_schema_version(conn, 6)
 
 
-def seed_settings_defaults(conn: sqlite3.Connection, defaults: dict[str, str]) -> None:
+def seed_settings_defaults(conn: Any, defaults: dict[str, str]) -> None:
     now = utc_now_iso()
     for key, value in defaults.items():
-        existing = conn.execute("SELECT key FROM app_settings WHERE key = ?", (key,)).fetchone()
+        existing = conn.execute("SELECT key FROM app_settings WHERE key = %s", (key,)).fetchone()
         if existing:
             continue
         conn.execute(
-            "INSERT INTO app_settings (key, value, updated_at_utc, updated_by_user_id) VALUES (?, ?, ?, NULL)",
+            "INSERT INTO app_settings (key, value, updated_at_utc, updated_by_user_id) VALUES (%s, %s, %s, NULL)",
             (key, str(value), now),
         )
     conn.commit()
 
 
-def list_settings(conn: sqlite3.Connection) -> dict[str, str]:
+def list_settings(conn: Any) -> dict[str, str]:
     rows = conn.execute("SELECT key, value FROM app_settings").fetchall()
     return {row["key"]: row["value"] for row in rows}
 
 
-def upsert_settings(conn: sqlite3.Connection, values: dict[str, str], updated_by_user_id: int | None):
+def upsert_settings(conn: Any, values: dict[str, str], updated_by_user_id: int | None):
     now = utc_now_iso()
     for key, value in values.items():
         conn.execute(
             """
             INSERT INTO app_settings (key, value, updated_at_utc, updated_by_user_id)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT(key) DO UPDATE SET
                 value = excluded.value,
                 updated_at_utc = excluded.updated_at_utc,
@@ -265,12 +319,12 @@ def upsert_settings(conn: sqlite3.Connection, values: dict[str, str], updated_by
     conn.commit()
 
 
-def upsert_settings_with_audit(conn: sqlite3.Connection, values: dict[str, str], updated_by_user_id: int | None):
+def upsert_settings_with_audit(conn: Any, values: dict[str, str], updated_by_user_id: int | None):
     if not values:
         return
 
     keys = tuple(values.keys())
-    placeholders = ",".join("?" for _ in keys)
+    placeholders = ",".join("%s" for _ in keys)
     existing_rows = conn.execute(
         f"SELECT key, value FROM app_settings WHERE key IN ({placeholders})",
         keys,
@@ -287,7 +341,7 @@ def upsert_settings_with_audit(conn: sqlite3.Connection, values: dict[str, str],
         conn.execute(
             """
             INSERT INTO settings_audit_log (key, old_value, new_value, changed_by_user_id, changed_at_utc)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
             """,
             (key, old_value, str(new_value), updated_by_user_id, now),
         )
@@ -295,7 +349,7 @@ def upsert_settings_with_audit(conn: sqlite3.Connection, values: dict[str, str],
 
 
 def list_settings_audit_history(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     key: str | None,
     page: int,
@@ -304,13 +358,14 @@ def list_settings_audit_history(
     where_sql = ""
     params: list[object] = []
     if key:
-        where_sql = "WHERE sal.key = ?"
+        where_sql = "WHERE sal.key = %s"
         params.append(key)
 
-    total = conn.execute(
-        f"SELECT COUNT(1) FROM settings_audit_log sal {where_sql}",
+    total_row = conn.execute(
+        f"SELECT COUNT(1) AS count_value FROM settings_audit_log sal {where_sql}",
         tuple(params),
-    ).fetchone()[0]
+    ).fetchone()
+    total = int(total_row["count_value"] if total_row else 0)
 
     offset = (max(1, int(page)) - 1) * int(page_size)
     rows = conn.execute(
@@ -320,28 +375,28 @@ def list_settings_audit_history(
         LEFT JOIN users u ON u.id = sal.changed_by_user_id
         {where_sql}
         ORDER BY sal.changed_at_utc DESC, sal.id DESC
-        LIMIT ? OFFSET ?
+        LIMIT %s OFFSET %s
         """,
         tuple([*params, int(page_size), int(offset)]),
     ).fetchall()
     return {"total": int(total), "rows": rows}
 
 
-def get_user_by_id(conn: sqlite3.Connection, user_id: int):
-    return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+def get_user_by_id(conn: Any, user_id: int):
+    return conn.execute("SELECT * FROM users WHERE id = %s", (user_id,)).fetchone()
 
 
-def get_user_by_email(conn: sqlite3.Connection, email: str):
-    return conn.execute("SELECT * FROM users WHERE lower(email) = lower(?)", (email.strip(),)).fetchone()
+def get_user_by_email(conn: Any, email: str):
+    return conn.execute("SELECT * FROM users WHERE lower(email) = lower(%s)", (email.strip(),)).fetchone()
 
 
-def list_owner_users(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+def list_owner_users(conn: Any) -> list[dict[str, Any]]:
     return conn.execute(
         "SELECT * FROM users WHERE role = 'owner' ORDER BY lower(name), lower(email)"
     ).fetchall()
 
 
-def list_admin_users(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+def list_admin_users(conn: Any) -> list[dict[str, Any]]:
     return conn.execute(
         """
         SELECT *
@@ -353,26 +408,28 @@ def list_admin_users(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def create_user(conn: sqlite3.Connection, *, email: str, name: str, role: str, password_hash: str):
+def create_user(conn: Any, *, email: str, name: str, role: str, password_hash: str):
     now = utc_now_iso()
     cur = conn.execute(
         """
         INSERT INTO users (email, name, role, password_hash, created_at_utc)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id
         """,
         (email.strip().lower(), name.strip(), role, password_hash, now),
     )
     conn.commit()
-    return get_user_by_id(conn, int(cur.lastrowid))
+    created = cur.fetchone()
+    return get_user_by_id(conn, int(created["id"]))
 
 
-def set_user_password(conn: sqlite3.Connection, user_id: int, password_hash: str):
-    conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+def set_user_password(conn: Any, user_id: int, password_hash: str):
+    conn.execute("UPDATE users SET password_hash = %s WHERE id = %s", (password_hash, user_id))
     conn.commit()
 
 
 def set_user_flags(
-    conn: sqlite3.Connection,
+    conn: Any,
     user_id: int,
     *,
     is_disabled: int | None = None,
@@ -382,47 +439,47 @@ def set_user_flags(
     fields: list[str] = []
     values: list[object] = []
     if is_disabled is not None:
-        fields.append("is_disabled = ?")
+        fields.append("is_disabled = %s")
         values.append(1 if int(is_disabled) else 0)
     if must_reset_password is not None:
-        fields.append("must_reset_password = ?")
+        fields.append("must_reset_password = %s")
         values.append(1 if int(must_reset_password) else 0)
     if last_login_at_utc is not None:
-        fields.append("last_login_at_utc = ?")
+        fields.append("last_login_at_utc = %s")
         values.append(last_login_at_utc)
     if not fields:
         return
     values.append(int(user_id))
-    conn.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", tuple(values))
+    conn.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = %s", tuple(values))
     conn.commit()
 
 
-def ensure_bootstrap_admin(conn: sqlite3.Connection, *, email: str, name: str, password_hash: str):
+def ensure_bootstrap_admin(conn: Any, *, email: str, name: str, password_hash: str):
     existing_admin = conn.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1").fetchone()
     if existing_admin:
         return None
     return create_user(conn, email=email, name=name, role="admin", password_hash=password_hash)
 
 
-def expire_open_owner_invites(conn: sqlite3.Connection, *, now_utc: str):
+def expire_open_owner_invites(conn: Any, *, now_utc: str):
     conn.execute(
         """
         UPDATE owner_invites
         SET status = 'expired'
         WHERE status = 'open'
-          AND expires_at_utc <= ?
+          AND expires_at_utc <= %s
         """,
         (now_utc,),
     )
     conn.commit()
 
 
-def revoke_open_owner_invites_for_user(conn: sqlite3.Connection, *, user_id: int):
+def revoke_open_owner_invites_for_user(conn: Any, *, user_id: int):
     conn.execute(
         """
         UPDATE owner_invites
         SET status = 'revoked'
-        WHERE user_id = ?
+        WHERE user_id = %s
           AND status = 'open'
         """,
         (int(user_id),),
@@ -431,7 +488,7 @@ def revoke_open_owner_invites_for_user(conn: sqlite3.Connection, *, user_id: int
 
 
 def create_owner_invite(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     user_id: int,
     token: str,
@@ -443,42 +500,44 @@ def create_owner_invite(
         """
         INSERT INTO owner_invites (
             user_id, token, status, expires_at_utc, created_by_user_id, created_at_utc, consumed_at_utc
-        ) VALUES (?, ?, 'open', ?, ?, ?, NULL)
+        ) VALUES (%s, %s, 'open', %s, %s, %s, NULL)
+        RETURNING id
         """,
         (int(user_id), token, expires_at_utc, created_by_user_id, now),
     )
     conn.commit()
-    return get_owner_invite_by_id(conn, int(cur.lastrowid))
+    created = cur.fetchone()
+    return get_owner_invite_by_id(conn, int(created["id"]))
 
 
-def get_owner_invite_by_id(conn: sqlite3.Connection, invite_id: int):
+def get_owner_invite_by_id(conn: Any, invite_id: int):
     return conn.execute(
         """
         SELECT oi.*
         FROM owner_invites oi
-        WHERE oi.id = ?
+        WHERE oi.id = %s
         """,
         (int(invite_id),),
     ).fetchone()
 
 
-def get_owner_invite_by_token(conn: sqlite3.Connection, token: str):
+def get_owner_invite_by_token(conn: Any, token: str):
     return conn.execute(
         """
         SELECT oi.*
         FROM owner_invites oi
-        WHERE oi.token = ?
+        WHERE oi.token = %s
         """,
         (token,),
     ).fetchone()
 
 
-def get_latest_owner_invite_for_user(conn: sqlite3.Connection, *, user_id: int):
+def get_latest_owner_invite_for_user(conn: Any, *, user_id: int):
     return conn.execute(
         """
         SELECT oi.*
         FROM owner_invites oi
-        WHERE oi.user_id = ?
+        WHERE oi.user_id = %s
         ORDER BY oi.created_at_utc DESC, oi.id DESC
         LIMIT 1
         """,
@@ -486,12 +545,12 @@ def get_latest_owner_invite_for_user(conn: sqlite3.Connection, *, user_id: int):
     ).fetchone()
 
 
-def get_open_owner_invite_for_user(conn: sqlite3.Connection, *, user_id: int):
+def get_open_owner_invite_for_user(conn: Any, *, user_id: int):
     return conn.execute(
         """
         SELECT oi.*
         FROM owner_invites oi
-        WHERE oi.user_id = ?
+        WHERE oi.user_id = %s
           AND oi.status = 'open'
         ORDER BY oi.created_at_utc DESC, oi.id DESC
         LIMIT 1
@@ -500,20 +559,20 @@ def get_open_owner_invite_for_user(conn: sqlite3.Connection, *, user_id: int):
     ).fetchone()
 
 
-def update_owner_invite_fields(conn: sqlite3.Connection, invite_id: int, fields: dict[str, object]):
+def update_owner_invite_fields(conn: Any, invite_id: int, fields: dict[str, object]):
     if not fields:
         return get_owner_invite_by_id(conn, int(invite_id))
     keys = list(fields.keys())
     values = [fields[k] for k in keys]
-    assignments = ", ".join(f"{k} = ?" for k in keys)
+    assignments = ", ".join(f"{k} = %s" for k in keys)
     values.append(int(invite_id))
-    conn.execute(f"UPDATE owner_invites SET {assignments} WHERE id = ?", tuple(values))
+    conn.execute(f"UPDATE owner_invites SET {assignments} WHERE id = %s", tuple(values))
     conn.commit()
     return get_owner_invite_by_id(conn, int(invite_id))
 
 
 def create_owner_audit_event(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     owner_user_id: int,
     action: str,
@@ -524,7 +583,7 @@ def create_owner_audit_event(
     conn.execute(
         """
         INSERT INTO owner_audit_events (owner_user_id, action, actor_user_id, metadata_json, created_at_utc)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s)
         """,
         (int(owner_user_id), str(action), actor_user_id, metadata_json, now),
     )
@@ -532,7 +591,7 @@ def create_owner_audit_event(
 
 
 def list_owner_audit_events(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     owner_user_id: int | None,
     action: str | None,
@@ -542,17 +601,18 @@ def list_owner_audit_events(
     where = ["1=1"]
     params: list[object] = []
     if owner_user_id:
-        where.append("ev.owner_user_id = ?")
+        where.append("ev.owner_user_id = %s")
         params.append(int(owner_user_id))
     if action:
-        where.append("ev.action = ?")
+        where.append("ev.action = %s")
         params.append(str(action))
     where_sql = " AND ".join(where)
 
-    total = conn.execute(
-        f"SELECT COUNT(1) FROM owner_audit_events ev WHERE {where_sql}",
+    total_row = conn.execute(
+        f"SELECT COUNT(1) AS count_value FROM owner_audit_events ev WHERE {where_sql}",
         tuple(params),
-    ).fetchone()[0]
+    ).fetchone()
+    total = int(total_row["count_value"] if total_row else 0)
     offset = (max(1, int(page)) - 1) * int(page_size)
     rows = conn.execute(
         f"""
@@ -567,7 +627,7 @@ def list_owner_audit_events(
         LEFT JOIN users a ON a.id = ev.actor_user_id
         WHERE {where_sql}
         ORDER BY ev.created_at_utc DESC, ev.id DESC
-        LIMIT ? OFFSET ?
+        LIMIT %s OFFSET %s
         """,
         tuple([*params, int(page_size), int(offset)]),
     ).fetchall()
@@ -575,7 +635,7 @@ def list_owner_audit_events(
 
 
 def create_email_notification_log(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     audience: str,
     source: str,
@@ -592,7 +652,7 @@ def create_email_notification_log(
         INSERT INTO email_notification_logs (
             audience, source, to_addresses, subject, status, error_message,
             reservation_ids_json, actor_user_id, created_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             str(audience or ""),
@@ -610,7 +670,7 @@ def create_email_notification_log(
 
 
 def list_email_notification_logs(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     audience: str | None,
     status: str | None,
@@ -620,13 +680,17 @@ def list_email_notification_logs(
     where = ["1=1"]
     params: list[object] = []
     if audience:
-        where.append("l.audience = ?")
+        where.append("l.audience = %s")
         params.append(str(audience))
     if status:
-        where.append("l.status = ?")
+        where.append("l.status = %s")
         params.append(str(status))
     where_sql = " AND ".join(where)
-    total = conn.execute(f"SELECT COUNT(1) FROM email_notification_logs l WHERE {where_sql}", tuple(params)).fetchone()[0]
+    total_row = conn.execute(
+        f"SELECT COUNT(1) AS count_value FROM email_notification_logs l WHERE {where_sql}",
+        tuple(params),
+    ).fetchone()
+    total = int(total_row["count_value"] if total_row else 0)
     offset = (max(1, int(page)) - 1) * int(page_size)
     rows = conn.execute(
         f"""
@@ -635,7 +699,7 @@ def list_email_notification_logs(
         LEFT JOIN users u ON u.id = l.actor_user_id
         WHERE {where_sql}
         ORDER BY l.created_at_utc DESC, l.id DESC
-        LIMIT ? OFFSET ?
+        LIMIT %s OFFSET %s
         """,
         tuple([*params, int(page_size), int(offset)]),
     ).fetchall()
@@ -643,7 +707,7 @@ def list_email_notification_logs(
 
 
 def overlap_exists(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     start_utc: str,
     end_utc: str,
@@ -651,18 +715,18 @@ def overlap_exists(
     statuses: Iterable[str] = BLOCKING_STATUSES,
 ) -> bool:
     statuses = tuple(statuses)
-    placeholders = ",".join("?" for _ in statuses)
+    placeholders = ",".join("%s" for _ in statuses)
     params: list[object] = [start_utc, end_utc, *statuses]
     extra = ""
     if exclude_id is not None:
-        extra = " AND id != ?"
+        extra = " AND id != %s"
         params.append(exclude_id)
     row = conn.execute(
         f"""
         SELECT 1
         FROM reservations
-        WHERE ? < end_utc
-          AND ? > start_utc
+        WHERE %s < end_utc
+          AND %s > start_utc
           AND status IN ({placeholders})
           {extra}
         LIMIT 1
@@ -673,7 +737,7 @@ def overlap_exists(
 
 
 def create_reservation(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     status: str,
     start_utc: str,
@@ -691,7 +755,8 @@ def create_reservation(
         INSERT INTO reservations (
             status, start_utc, end_utc, dep_icao, dest_icao, parked_icao,
             traveling_user_id, requested_by_user_id, notes, created_at_utc, updated_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
         """,
         (
             status,
@@ -708,10 +773,11 @@ def create_reservation(
         ),
     )
     conn.commit()
-    return get_reservation_by_id(conn, int(cur.lastrowid))
+    created = cur.fetchone()
+    return get_reservation_by_id(conn, int(created["id"]))
 
 
-def get_reservation_by_id(conn: sqlite3.Connection, reservation_id: int):
+def get_reservation_by_id(conn: Any, reservation_id: int):
     return conn.execute(
         """
         SELECT r.*, tu.name AS traveling_owner_name, ru.name AS requested_by_name, au.name AS approved_by_name
@@ -719,35 +785,35 @@ def get_reservation_by_id(conn: sqlite3.Connection, reservation_id: int):
         JOIN users tu ON tu.id = r.traveling_user_id
         JOIN users ru ON ru.id = r.requested_by_user_id
         LEFT JOIN users au ON au.id = r.approved_by_user_id
-        WHERE r.id = ?
+        WHERE r.id = %s
         """,
         (reservation_id,),
     ).fetchone()
 
 
-def update_reservation_fields(conn: sqlite3.Connection, reservation_id: int, fields: dict[str, object]):
+def update_reservation_fields(conn: Any, reservation_id: int, fields: dict[str, object]):
     if not fields:
         return get_reservation_by_id(conn, reservation_id)
     items = dict(fields)
     items["updated_at_utc"] = utc_now_iso()
     keys = list(items.keys())
-    assignments = ", ".join(f"{k} = ?" for k in keys)
+    assignments = ", ".join(f"{k} = %s" for k in keys)
     values = [items[k] for k in keys]
     values.append(reservation_id)
-    conn.execute(f"UPDATE reservations SET {assignments} WHERE id = ?", tuple(values))
+    conn.execute(f"UPDATE reservations SET {assignments} WHERE id = %s", tuple(values))
     conn.commit()
     return get_reservation_by_id(conn, reservation_id)
 
 
 def list_reservations(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     start_utc: str,
     end_utc: str,
     include_nonblocking: bool,
-) -> list[sqlite3.Row]:
+) -> list[dict[str, Any]]:
     statuses = ALL_STATUSES if include_nonblocking else BLOCKING_STATUSES
-    placeholders = ",".join("?" for _ in statuses)
+    placeholders = ",".join("%s" for _ in statuses)
     return conn.execute(
         f"""
         SELECT r.*, tu.name AS traveling_owner_name, ru.name AS requested_by_name, au.name AS approved_by_name
@@ -755,8 +821,8 @@ def list_reservations(
         JOIN users tu ON tu.id = r.traveling_user_id
         JOIN users ru ON ru.id = r.requested_by_user_id
         LEFT JOIN users au ON au.id = r.approved_by_user_id
-        WHERE r.start_utc < ?
-          AND r.end_utc > ?
+        WHERE r.start_utc < %s
+          AND r.end_utc > %s
           AND r.status IN ({placeholders})
         ORDER BY r.start_utc ASC
         """,
@@ -764,7 +830,7 @@ def list_reservations(
     ).fetchall()
 
 
-def list_pending(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+def list_pending(conn: Any) -> list[dict[str, Any]]:
     return conn.execute(
         """
         SELECT r.*, tu.name AS traveling_owner_name, ru.name AS requested_by_name
@@ -777,28 +843,28 @@ def list_pending(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def list_upcoming(conn: sqlite3.Connection, *, from_utc: str, limit: int = 10) -> list[sqlite3.Row]:
+def list_upcoming(conn: Any, *, from_utc: str, limit: int = 10) -> list[dict[str, Any]]:
     return conn.execute(
         """
         SELECT r.*, tu.name AS traveling_owner_name
         FROM reservations r
         JOIN users tu ON tu.id = r.traveling_user_id
-        WHERE r.end_utc >= ?
+        WHERE r.end_utc >= %s
           AND r.status IN ('pending', 'approved')
         ORDER BY r.start_utc ASC
-        LIMIT ?
+        LIMIT %s
         """,
         (from_utc, int(limit)),
     ).fetchall()
 
 
-def last_approved_before(conn: sqlite3.Connection, *, now_utc: str):
+def last_approved_before(conn: Any, *, now_utc: str):
     return conn.execute(
         """
         SELECT *
         FROM reservations
         WHERE status = 'approved'
-          AND end_utc <= ?
+          AND end_utc <= %s
         ORDER BY end_utc DESC
         LIMIT 1
         """,
@@ -807,7 +873,7 @@ def last_approved_before(conn: sqlite3.Connection, *, now_utc: str):
 
 
 def find_next_available_window(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     from_utc: str,
     to_utc: str,
@@ -817,8 +883,8 @@ def find_next_available_window(
         SELECT start_utc, end_utc
         FROM reservations
         WHERE status IN ('pending', 'approved')
-          AND end_utc > ?
-          AND start_utc < ?
+          AND end_utc > %s
+          AND start_utc < %s
         ORDER BY start_utc ASC
         """,
         (from_utc, to_utc),
@@ -839,7 +905,7 @@ def find_next_available_window(
 
 
 def list_admin_flights(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     status: str | None,
     from_utc: str | None,
@@ -854,37 +920,38 @@ def list_admin_flights(
     params: list[object] = []
 
     if status and status != "all":
-        where.append("r.status = ?")
+        where.append("r.status = %s")
         params.append(status)
     if from_utc:
-        where.append("r.end_utc >= ?")
+        where.append("r.end_utc >= %s")
         params.append(from_utc)
     if to_utc:
-        where.append("r.start_utc <= ?")
+        where.append("r.start_utc <= %s")
         params.append(to_utc)
     if owner_id:
-        where.append("r.traveling_user_id = ?")
+        where.append("r.traveling_user_id = %s")
         params.append(int(owner_id))
     if requested_by_id:
-        where.append("r.requested_by_user_id = ?")
+        where.append("r.requested_by_user_id = %s")
         params.append(int(requested_by_id))
     if query:
         q = f"%{query.lower()}%"
-        where.append("(lower(r.dep_icao) LIKE ? OR lower(r.dest_icao) LIKE ? OR lower(tu.name) LIKE ? OR lower(ru.name) LIKE ?)")
+        where.append("(lower(r.dep_icao) LIKE %s OR lower(r.dest_icao) LIKE %s OR lower(tu.name) LIKE %s OR lower(ru.name) LIKE %s)")
         params.extend([q, q, q, q])
 
     where_sql = " AND ".join(where)
 
-    total = conn.execute(
+    total_row = conn.execute(
         f"""
-        SELECT COUNT(1)
+        SELECT COUNT(1) AS count_value
         FROM reservations r
         JOIN users tu ON tu.id = r.traveling_user_id
         JOIN users ru ON ru.id = r.requested_by_user_id
         WHERE {where_sql}
         """,
         tuple(params),
-    ).fetchone()[0]
+    ).fetchone()
+    total = int(total_row["count_value"] if total_row else 0)
 
     offset = (max(page, 1) - 1) * page_size
     rows = conn.execute(
@@ -896,7 +963,7 @@ def list_admin_flights(
         LEFT JOIN users au ON au.id = r.approved_by_user_id
         WHERE {where_sql}
         ORDER BY r.start_utc DESC
-        LIMIT ? OFFSET ?
+        LIMIT %s OFFSET %s
         """,
         tuple([*params, int(page_size), int(offset)]),
     ).fetchall()
@@ -904,14 +971,14 @@ def list_admin_flights(
     return {"total": int(total), "rows": rows}
 
 
-def list_my_flights(conn: sqlite3.Connection, *, user_id: int, from_utc: str):
+def list_my_flights(conn: Any, *, user_id: int, from_utc: str):
     pending = conn.execute(
         """
         SELECT r.*, tu.name AS traveling_owner_name, ru.name AS requested_by_name
         FROM reservations r
         JOIN users tu ON tu.id = r.traveling_user_id
         JOIN users ru ON ru.id = r.requested_by_user_id
-        WHERE r.requested_by_user_id = ?
+        WHERE r.requested_by_user_id = %s
           AND r.status = 'pending'
         ORDER BY r.start_utc ASC
         """,
@@ -924,9 +991,9 @@ def list_my_flights(conn: sqlite3.Connection, *, user_id: int, from_utc: str):
         FROM reservations r
         JOIN users tu ON tu.id = r.traveling_user_id
         JOIN users ru ON ru.id = r.requested_by_user_id
-        WHERE r.requested_by_user_id = ?
+        WHERE r.requested_by_user_id = %s
           AND r.status = 'approved'
-          AND r.end_utc >= ?
+          AND r.end_utc >= %s
         ORDER BY r.start_utc ASC
         """,
         (int(user_id), from_utc),
@@ -936,7 +1003,7 @@ def list_my_flights(conn: sqlite3.Connection, *, user_id: int, from_utc: str):
 
 
 def create_change_request(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     reservation_id: int,
     requested_by_user_id: int,
@@ -953,7 +1020,8 @@ def create_change_request(
             reservation_id, requested_by_user_id, status,
             proposed_start_utc, proposed_end_utc, proposed_dep_icao, proposed_dest_icao, proposed_notes,
             created_at_utc, updated_at_utc
-        ) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
         """,
         (
             int(reservation_id),
@@ -968,65 +1036,66 @@ def create_change_request(
         ),
     )
     conn.commit()
-    return get_change_request_by_id(conn, int(cur.lastrowid))
+    created = cur.fetchone()
+    return get_change_request_by_id(conn, int(created["id"]))
 
 
-def get_change_request_by_id(conn: sqlite3.Connection, request_id: int):
+def get_change_request_by_id(conn: Any, request_id: int):
     return conn.execute(
         """
         SELECT cr.*, u.name AS requested_by_name, d.name AS decided_by_name
         FROM reservation_change_requests cr
         JOIN users u ON u.id = cr.requested_by_user_id
         LEFT JOIN users d ON d.id = cr.decided_by_user_id
-        WHERE cr.id = ?
+        WHERE cr.id = %s
         """,
         (int(request_id),),
     ).fetchone()
 
 
-def list_change_requests_for_reservation(conn: sqlite3.Connection, reservation_id: int):
+def list_change_requests_for_reservation(conn: Any, reservation_id: int):
     return conn.execute(
         """
         SELECT cr.*, u.name AS requested_by_name, d.name AS decided_by_name
         FROM reservation_change_requests cr
         JOIN users u ON u.id = cr.requested_by_user_id
         LEFT JOIN users d ON d.id = cr.decided_by_user_id
-        WHERE cr.reservation_id = ?
+        WHERE cr.reservation_id = %s
         ORDER BY cr.created_at_utc DESC
         """,
         (int(reservation_id),),
     ).fetchall()
 
 
-def list_my_change_requests(conn: sqlite3.Connection, user_id: int):
+def list_my_change_requests(conn: Any, user_id: int):
     return conn.execute(
         """
         SELECT cr.*, r.status AS reservation_status
         FROM reservation_change_requests cr
         JOIN reservations r ON r.id = cr.reservation_id
-        WHERE cr.requested_by_user_id = ?
+        WHERE cr.requested_by_user_id = %s
         ORDER BY cr.created_at_utc DESC
         """,
         (int(user_id),),
     ).fetchall()
 
 
-def update_change_request_fields(conn: sqlite3.Connection, request_id: int, fields: dict[str, object]):
+def update_change_request_fields(conn: Any, request_id: int, fields: dict[str, object]):
     if not fields:
         return get_change_request_by_id(conn, request_id)
     items = dict(fields)
     items["updated_at_utc"] = utc_now_iso()
     keys = list(items.keys())
-    assignments = ", ".join(f"{k} = ?" for k in keys)
+    assignments = ", ".join(f"{k} = %s" for k in keys)
     values = [items[k] for k in keys]
     values.append(int(request_id))
-    conn.execute(f"UPDATE reservation_change_requests SET {assignments} WHERE id = ?", tuple(values))
+    conn.execute(f"UPDATE reservation_change_requests SET {assignments} WHERE id = %s", tuple(values))
     conn.commit()
     return get_change_request_by_id(conn, request_id)
 
 
 def create_planner_quote_draft(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     token: str,
     user_id: int,
@@ -1038,56 +1107,58 @@ def create_planner_quote_draft(
         """
         INSERT INTO planner_quote_drafts (
             token, user_id, status, draft_json, created_at_utc, expires_at_utc, consumed_at_utc
-        ) VALUES (?, ?, 'open', ?, ?, ?, NULL)
+        ) VALUES (%s, %s, 'open', %s, %s, %s, NULL)
+        RETURNING id
         """,
         (token, int(user_id), draft_json, now, expires_at_utc),
     )
     conn.commit()
-    return get_planner_quote_draft_by_id(conn, int(cur.lastrowid))
+    created = cur.fetchone()
+    return get_planner_quote_draft_by_id(conn, int(created["id"]))
 
 
-def get_planner_quote_draft_by_id(conn: sqlite3.Connection, draft_id: int):
+def get_planner_quote_draft_by_id(conn: Any, draft_id: int):
     return conn.execute(
         """
         SELECT d.*
         FROM planner_quote_drafts d
-        WHERE d.id = ?
+        WHERE d.id = %s
         """,
         (int(draft_id),),
     ).fetchone()
 
 
-def get_planner_quote_draft_by_token(conn: sqlite3.Connection, token: str):
+def get_planner_quote_draft_by_token(conn: Any, token: str):
     return conn.execute(
         """
         SELECT d.*
         FROM planner_quote_drafts d
-        WHERE d.token = ?
+        WHERE d.token = %s
         """,
         (token,),
     ).fetchone()
 
 
-def expire_open_planner_quote_drafts(conn: sqlite3.Connection, *, now_utc: str):
+def expire_open_planner_quote_drafts(conn: Any, *, now_utc: str):
     conn.execute(
         """
         UPDATE planner_quote_drafts
         SET status = 'expired'
         WHERE status = 'open'
-          AND expires_at_utc <= ?
+          AND expires_at_utc <= %s
         """,
         (now_utc,),
     )
     conn.commit()
 
 
-def consume_planner_quote_draft(conn: sqlite3.Connection, draft_id: int, *, consumed_at_utc: str):
+def consume_planner_quote_draft(conn: Any, draft_id: int, *, consumed_at_utc: str):
     conn.execute(
         """
         UPDATE planner_quote_drafts
         SET status = 'consumed',
-            consumed_at_utc = ?
-        WHERE id = ?
+            consumed_at_utc = %s
+        WHERE id = %s
           AND status = 'open'
         """,
         (consumed_at_utc, int(draft_id)),

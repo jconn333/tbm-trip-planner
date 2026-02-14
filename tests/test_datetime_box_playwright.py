@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import os
 from threading import Thread
 
 import pytest
@@ -27,11 +28,14 @@ class _ServerThread(Thread):
 
 @pytest.fixture
 def live_server(tmp_path, monkeypatch):
-    db_path = tmp_path / "test_datetime_click.sqlite3"
-    monkeypatch.setattr(tbm_app, "TBM_DB_PATH", str(db_path))
+    db_url = os.environ.get("TEST_DATABASE_URL") or tbm_app.DATABASE_URL
+    if not db_url:
+        pytest.skip("Set TEST_DATABASE_URL (or DATABASE_URL) for Postgres-backed tests.")
+    monkeypatch.setattr(tbm_app, "DATABASE_URL", db_url)
     monkeypatch.setattr(tbm_app, "TBM_HOME_TZ", "America/New_York")
-    storage.init_db(str(db_path))
-    with storage.get_conn(str(db_path)) as conn:
+    storage.init_db(db_url)
+    with storage.get_conn(db_url) as conn:
+        storage.reset_for_tests(conn)
         storage.seed_settings_defaults(conn, tbm_app._default_runtime_settings())
         admin = storage.create_user(
             conn,

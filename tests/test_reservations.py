@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 
 import pytest
@@ -8,13 +9,16 @@ from auth import hash_password
 
 
 @pytest.fixture
-def reservation_env(tmp_path, monkeypatch):
-    db_path = tmp_path / "test_reservations.sqlite3"
-    monkeypatch.setattr(tbm_app, "TBM_DB_PATH", str(db_path))
+def reservation_env(monkeypatch):
+    db_url = os.environ.get("TEST_DATABASE_URL") or tbm_app.DATABASE_URL
+    if not db_url:
+        pytest.skip("Set TEST_DATABASE_URL (or DATABASE_URL) for Postgres-backed tests.")
+    monkeypatch.setattr(tbm_app, "DATABASE_URL", db_url)
     monkeypatch.setattr(tbm_app, "TBM_HOME_TZ", "America/New_York")
-    storage.init_db(str(db_path))
+    storage.init_db(db_url)
 
-    with storage.get_conn(str(db_path)) as conn:
+    with storage.get_conn(db_url) as conn:
+        storage.reset_for_tests(conn)
         admin = storage.create_user(
             conn,
             email="admin@example.com",
@@ -37,7 +41,7 @@ def reservation_env(tmp_path, monkeypatch):
             password_hash=hash_password("ownerpass123"),
         )
     return {
-        "db_path": str(db_path),
+        "db_url": db_url,
         "admin": int(admin["id"]),
         "owner1": int(owner1["id"]),
         "owner2": int(owner2["id"]),
@@ -142,7 +146,7 @@ def test_owner_cannot_call_admin_endpoint(reservation_env):
 
 
 def test_list_admin_users_excludes_disabled(reservation_env):
-    with storage.get_conn(reservation_env["db_path"]) as conn:
+    with storage.get_conn(reservation_env["db_url"]) as conn:
         admins = storage.list_admin_users(conn)
         assert len(admins) == 1
         assert admins[0]["email"] == "admin@example.com"
@@ -849,9 +853,9 @@ def test_roundtrip_quote_submit_is_atomic_when_overlap_exists(reservation_env):
     assert submit.status_code == 409
     assert submit.get_json()["code"] == "overlap_conflict"
 
-    with storage.get_conn(reservation_env["db_path"]) as conn:
+    with storage.get_conn(reservation_env["db_url"]) as conn:
         owner1_rows = conn.execute(
-            "SELECT id FROM reservations WHERE requested_by_user_id = ?",
+            "SELECT id FROM reservations WHERE requested_by_user_id = %s",
             (reservation_env["owner1"],),
         ).fetchall()
     assert len(owner1_rows) == 0
