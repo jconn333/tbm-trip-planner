@@ -53,7 +53,18 @@
   line-height:1.1;
   padding-top:1px;
 }
-.flightWhen{margin:0;color:var(--color-muted);font-size:12.5px;line-height:1.4}
+.flightWhen{
+  margin:2px 0 0;
+  color:var(--color-text-strong);
+  font-size:14px;
+  line-height:1.4;
+  font-weight:620;
+  letter-spacing:0;
+}
+.flightWhenLabel{
+  color:var(--muted);
+  font-weight:600;
+}
 .flightMeta{color:var(--muted);font-size:12px;margin-top:8px}
 .flightActions{display:flex;justify-content:flex-end;margin-top:10px}
 .flightActionWrap{position:relative}
@@ -159,6 +170,7 @@
 @media (max-width:560px){
   .flightTop{align-items:flex-start;flex-direction:column}
   .flightActions .btn{width:100%}
+  .flightWhen{font-size:13px}
 }
 {% endblock %}
 {% block content %}
@@ -371,6 +383,22 @@
     return String(value || '').slice(0,16).replace('T',' ');
   }
 
+  function formatFlightDateWithWeekday(isoValue, fallbackDisplay){
+    const fallback = String(fallbackDisplay || '').trim();
+    const dateObj = new Date(isoValue || '');
+    if(Number.isNaN(dateObj.getTime())){
+      return fallback || String(isoValue || '').trim();
+    }
+    const weekday = dateObj.toLocaleDateString(undefined, { weekday: 'short' });
+    return `${weekday} ${formatLocalDateTime(isoValue)}`;
+  }
+
+  function formatFlightWindow(startIso, endIso, startDisplay){
+    const startText = formatFlightDateWithWeekday(startIso, startDisplay);
+    if(!startText) return '';
+    return `<span class="flightWhenLabel">Depart:</span> ${startText}`;
+  }
+
   function statusClass(status){
     const normalized = String(status || '').toLowerCase();
     if(normalized === 'pending') return 'statusPending';
@@ -424,7 +452,7 @@
             </p>
             <span class="statusChip ${statusClass('pending')}">Pending</span>
           </div>
-          <p class="flightWhen">${item.start_display} to ${item.end_display}</p>
+          <p class="flightWhen">${formatFlightWindow(item.start, item.end, item.start_display)}</p>
         </div>
         <div class="flightMeta">${item.notes || ''}</div>
         <div class="flightActions">
@@ -458,7 +486,7 @@
             </p>
             <span class="statusChip ${statusClass('approved')}">Approved</span>
           </div>
-          <p class="flightWhen">${item.start_display} to ${item.end_display}</p>
+          <p class="flightWhen">${formatFlightWindow(item.start, item.end, item.start_display)}</p>
         </div>
         <div class="flightMeta">${item.notes || ''}</div>
         <div class="flightActions">

@@ -59,11 +59,16 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
   padding-top:1px;
 }
 .flightWhen{
-  margin:0;
+  margin:2px 0 0;
   color:var(--color-text-strong);
   font-size:14px;
-  line-height:1.45;
+  line-height:1.4;
   font-weight:620;
+  letter-spacing:0;
+}
+.flightWhenLabel{
+  color:var(--muted);
+  font-weight:600;
 }
 .flightOwnerRow{
   color:var(--color-text-strong);
@@ -149,6 +154,7 @@ input,select,textarea{width:100%;border:1px solid rgba(255,255,255,.18);backgrou
 @media (max-width:560px){
   .flightTop{align-items:flex-start;flex-direction:column}
   .flightActions .btn{width:100%}
+  .flightWhen{font-size:13px}
 }
 {% endblock %}
 {% block content %}
@@ -418,6 +424,22 @@ function itemActions(item){
     return String(value || '').slice(0,16).replace('T',' ');
   }
 
+  function formatFlightDateWithWeekday(isoValue, fallbackDisplay){
+    const fallback = String(fallbackDisplay || '').trim();
+    const dateObj = new Date(isoValue || '');
+    if(Number.isNaN(dateObj.getTime())){
+      return fallback || String(isoValue || '').trim();
+    }
+    const weekday = dateObj.toLocaleDateString(undefined, { weekday: 'short' });
+    return `${weekday} ${formatLocalDateTime(isoValue)}`;
+  }
+
+  function formatFlightWindow(startIso, endIso, startDisplay){
+    const startText = formatFlightDateWithWeekday(startIso, startDisplay);
+    if(!startText) return '';
+    return `<span class="flightWhenLabel">Depart:</span> ${startText}`;
+  }
+
   function statusClass(status){
     const normalized = String(status || '').toLowerCase();
     if(normalized === 'pending') return 'statusPending';
@@ -453,7 +475,7 @@ function itemActions(item){
               </p>
               <span class="statusChip ${statusClass(item.status)}">${item.status.toUpperCase()}</span>
             </div>
-            <p class="flightWhen">${item.start_display} to ${item.end_display}</p>
+            <p class="flightWhen">${formatFlightWindow(item.start, item.end, item.start_display)}</p>
           </div>
           <div class="flightOwnerRow">Owner: <strong>${item.traveling_owner}</strong></div>
           <div class="flightSupportMeta">Requested by: ${item.requested_by} | Parked: ${item.parked_icao}</div>
