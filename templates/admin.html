@@ -23,6 +23,8 @@
 .ownerName{ font-weight:700; }
 .ownerMeta{ font-size:12px; color:var(--color-muted); margin-top:4px; }
 .statusChips{ display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+.ownerActionRow{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+.ownerActionSelect{ min-width:220px; }
 .chip{ border:1px solid var(--color-border); border-radius:999px; padding:2px 8px; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; }
 .chip.bad{ border-color:#e2acb3; background:#fff1f3; color:#782532; }
 .chip.good{ border-color:#9ed8b4; background:#eaf8ef; color:#245736; }
@@ -176,17 +178,21 @@
             <div class="statusChips">${ownerChips(owner)}</div>
           </div>
         </div>
-        <div class="actions">
-          <button class="btn" data-owner-action="edit-profile" data-owner-id="${owner.id}" data-owner-name="${owner.name}" data-owner-email="${owner.email}">Edit Name/Email</button>
-          <button class="btn" data-owner-action="${owner.is_disabled ? 'enable' : 'disable'}" data-owner-id="${owner.id}">${owner.is_disabled ? 'Enable' : 'Disable'}</button>
-          <button class="btn" data-owner-action="force-reset" data-owner-id="${owner.id}">Force Password Reset</button>
-          <button class="btn" data-owner-action="resend-invite" data-owner-id="${owner.id}">Resend Invite</button>
-          <button class="btn" data-owner-action="revoke-invite" data-owner-id="${owner.id}">Revoke Invite</button>
-          <button class="btn" data-owner-action="admin-reset" data-owner-id="${owner.id}">Set Temp Password</button>
+        <div class="ownerActionRow">
+          <select class="ownerActionSelect js-custom-select" data-owner-select="${owner.id}">
+            <option value="edit-profile">Edit Name/Email</option>
+            <option value="${owner.is_disabled ? 'enable' : 'disable'}">${owner.is_disabled ? 'Enable Account' : 'Disable Account'}</option>
+            <option value="force-reset">Force Password Reset</option>
+            <option value="admin-reset">Set Temporary Password</option>
+            <option value="resend-invite">Resend Invite</option>
+            <option value="revoke-invite">Revoke Invite</option>
+          </select>
+          <button class="btn" data-owner-apply="1" data-owner-id="${owner.id}" data-owner-name="${owner.name}" data-owner-email="${owner.email}">Apply</button>
         </div>
         ${owner.invite_link ? `<div class="ownerMeta">Invite: <a href="${owner.invite_link}" target="_blank" rel="noopener">${owner.invite_link}</a></div>` : ''}
       </article>
     `).join('');
+    if(window.TBMReservationUI){ window.TBMReservationUI.enhanceSelects(ownerList); }
   }
 
   async function loadAudit(){
@@ -261,8 +267,11 @@
   ownerList.addEventListener('click', async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
-    const action = target.getAttribute('data-owner-action');
+    if(target.getAttribute('data-owner-apply') !== '1') return;
     const id = target.getAttribute('data-owner-id');
+    if(!id) return;
+    const select = ownerList.querySelector(`select[data-owner-select="${id}"]`);
+    const action = select ? select.value : '';
     if(!action || !id) return;
     let endpoint = '';
     let payload = {};
