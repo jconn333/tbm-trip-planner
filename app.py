@@ -177,6 +177,7 @@ RATE_LIMIT_RULES = {
     "login_post": (_env_int("TBM_RATE_LIMIT_LOGIN_PER_WINDOW", 20), RATE_LIMIT_DEFAULT_WINDOW_SEC),
     "api_owner_reset_password": (_env_int("TBM_RATE_LIMIT_ADMIN_WRITES_PER_WINDOW", 60), RATE_LIMIT_DEFAULT_WINDOW_SEC),
     "api_create_owner": (_env_int("TBM_RATE_LIMIT_ADMIN_WRITES_PER_WINDOW", 60), RATE_LIMIT_DEFAULT_WINDOW_SEC),
+    "api_update_owner": (_env_int("TBM_RATE_LIMIT_ADMIN_WRITES_PER_WINDOW", 60), RATE_LIMIT_DEFAULT_WINDOW_SEC),
     "api_admin_settings_patch": (_env_int("TBM_RATE_LIMIT_ADMIN_WRITES_PER_WINDOW", 60), RATE_LIMIT_DEFAULT_WINDOW_SEC),
     "api_approve_reservation": (_env_int("TBM_RATE_LIMIT_ADMIN_WRITES_PER_WINDOW", 60), RATE_LIMIT_DEFAULT_WINDOW_SEC),
     "api_deny_reservation": (_env_int("TBM_RATE_LIMIT_ADMIN_WRITES_PER_WINDOW", 60), RATE_LIMIT_DEFAULT_WINDOW_SEC),
@@ -2525,6 +2526,54 @@ def api_create_owner():
     if invite_payload:
         response["invite"] = invite_payload
     return jsonify(response), 201
+
+
+@app.patch("/api/owners/<int:user_id>")
+@admin_required
+def api_update_owner(user_id: int):
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return _json_error("Request body must be a JSON object.", 400, "invalid_json")
+
+    name_raw = data.get("name")
+    email_raw = data.get("email")
+    updates: dict[str, str] = {}
+    metadata: dict[str, str] = {}
+
+    if name_raw is not None:
+        name = str(name_raw).strip()
+        if not name:
+            return _json_error("name cannot be empty.", 400, "invalid_owner", "name")
+        updates["name"] = name
+        metadata["name"] = name
+    if email_raw is not None:
+        email = str(email_raw).strip().lower()
+        if not email:
+            return _json_error("email cannot be empty.", 400, "invalid_owner", "email")
+        updates["email"] = email
+        metadata["email"] = email
+
+    if not updates:
+        return _json_error("Provide at least one field: name or email.", 400, "invalid_owner")
+
+    try:
+        with _db_conn() as conn:
+            target = storage.get_user_by_id(conn, user_id)
+            if not target:
+                return _json_error("Owner not found.", 404, "not_found")
+            if target["role"] != "owner":
+                return _json_error("Only owners can be updated here.", 400, "invalid_owner")
+            set_clause = ", ".join(f"{k} = ?" for k in updates.keys())
+            values = [updates[k] for k in updates.keys()]
+            values.append(int(user_id))
+            conn.execute(f"UPDATE users SET {set_clause} WHERE id = ?", tuple(values))
+            conn.commit()
+            _log_owner_audit(conn, owner_user_id=user_id, action="owner_profile_updated", metadata=metadata)
+            refreshed = storage.get_user_by_id(conn, user_id)
+    except sqlite3.IntegrityError:
+        return _json_error("An account with this email already exists.", 409, "owner_exists", "email")
+
+    return jsonify({"ok": True, "owner": _serialize_user(refreshed)})
 
 
 @app.post("/api/owners/<int:user_id>/reset-password")

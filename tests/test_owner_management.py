@@ -200,3 +200,38 @@ def test_revoke_and_resend_invite_flow(tmp_path, monkeypatch):
         storage.expire_open_owner_invites(conn, now_utc=(datetime.now(ZoneInfo("UTC")) + timedelta(days=3)).isoformat())
         invite = storage.get_latest_owner_invite_for_user(conn, user_id=owner_id)
         assert invite["status"] in ("expired", "revoked", "consumed", "open")
+
+
+def test_admin_can_update_owner_name_and_email(tmp_path, monkeypatch):
+    _setup_env(tmp_path, monkeypatch)
+    admin = tbm_app.app.test_client()
+    assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
+
+    created = admin.post("/api/owners", json={"name": "Edit Me", "email": "editme@example.com"})
+    assert created.status_code == 201
+    owner_id = int(created.get_json()["owner"]["id"])
+
+    updated = admin.patch(
+        f"/api/owners/{owner_id}",
+        json={"name": "Edited Name", "email": "edited@example.com"},
+    )
+    assert updated.status_code == 200
+    body = updated.get_json()
+    assert body["owner"]["name"] == "Edited Name"
+    assert body["owner"]["email"] == "edited@example.com"
+
+
+def test_admin_update_owner_email_rejects_duplicate(tmp_path, monkeypatch):
+    _setup_env(tmp_path, monkeypatch)
+    admin = tbm_app.app.test_client()
+    assert _login(admin, "admin@example.com", "adminpass123").status_code == 200
+
+    first = admin.post("/api/owners", json={"name": "Owner One", "email": "one@example.com"})
+    second = admin.post("/api/owners", json={"name": "Owner Two", "email": "two@example.com"})
+    assert first.status_code == 201
+    assert second.status_code == 201
+    second_id = int(second.get_json()["owner"]["id"])
+
+    conflict = admin.patch(f"/api/owners/{second_id}", json={"email": "one@example.com"})
+    assert conflict.status_code == 409
+    assert conflict.get_json()["code"] == "owner_exists"

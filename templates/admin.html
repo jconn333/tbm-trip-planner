@@ -177,6 +177,7 @@
           </div>
         </div>
         <div class="actions">
+          <button class="btn" data-owner-action="edit-profile" data-owner-id="${owner.id}" data-owner-name="${owner.name}" data-owner-email="${owner.email}">Edit Name/Email</button>
           <button class="btn" data-owner-action="${owner.is_disabled ? 'enable' : 'disable'}" data-owner-id="${owner.id}">${owner.is_disabled ? 'Enable' : 'Disable'}</button>
           <button class="btn" data-owner-action="force-reset" data-owner-id="${owner.id}">Force Password Reset</button>
           <button class="btn" data-owner-action="resend-invite" data-owner-id="${owner.id}">Resend Invite</button>
@@ -270,6 +271,16 @@
     if(action === 'force-reset') endpoint = `/api/owners/${id}/force-password-reset`;
     if(action === 'resend-invite') endpoint = `/api/owners/${id}/invites`;
     if(action === 'revoke-invite') endpoint = `/api/owners/${id}/invites/revoke`;
+    if(action === 'edit-profile'){
+      const currentName = target.getAttribute('data-owner-name') || '';
+      const currentEmail = target.getAttribute('data-owner-email') || '';
+      const nextName = window.prompt('Owner name:', currentName);
+      if(nextName === null) return;
+      const nextEmail = window.prompt('Owner email:', currentEmail);
+      if(nextEmail === null) return;
+      endpoint = `/api/owners/${id}`;
+      payload = { name: nextName.trim(), email: nextEmail.trim() };
+    }
     if(action === 'admin-reset'){
       const password = window.prompt('Set temporary password (8+ chars):', 'OwnerTemp123!') || '';
       if(!password) return;
@@ -277,7 +288,8 @@
       payload = { password };
     }
     if(!endpoint) return;
-    const resp = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const method = action === 'edit-profile' ? 'PATCH' : 'POST';
+    const resp = await fetch(endpoint, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const data = await resp.json().catch(()=>({}));
     if(!resp.ok){ alert(data.error || 'Owner action failed.'); return; }
     await loadOwners();
