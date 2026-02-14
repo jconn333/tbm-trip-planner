@@ -7,6 +7,16 @@ import db as storage
 from auth import hash_password
 
 
+@pytest.fixture(autouse=True)
+def geocode_test_defaults(monkeypatch):
+    monkeypatch.setattr(tbm_app, "GOOGLE_MAPS_API_KEY", "")
+    monkeypatch.setattr(tbm_app, "GEOCODE_PROVIDER_ORDER_RAW", "nominatim,census")
+    with tbm_app._GEOCODE_CACHE_LOCK:
+        tbm_app._GEOCODE_CACHE.clear()
+    with tbm_app._GEOCODE_SUGGEST_CACHE_LOCK:
+        tbm_app._GEOCODE_SUGGEST_CACHE.clear()
+
+
 def test_haversine_nm_basic_range():
     # Approx JFK -> LAX great-circle distance should be around 2145 nm.
     nm = tbm_app.haversine_nm(40.6413, -73.7781, 33.9416, -118.4085)
@@ -26,6 +36,125 @@ def test_location_query_candidates_city_state():
     candidates = tbm_app._location_query_candidates("Trenton MO")
     assert "Trenton, MO" in candidates
     assert "Trenton, MO, USA" in candidates
+
+
+def test_smtp_send_email_success(monkeypatch):
+    calls = {"starttls": 0, "login": 0, "send": 0}
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout):
+            assert host == "smtp.test.local"
+            assert port == 587
+            assert timeout == 8
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            calls["starttls"] += 1
+
+        def login(self, username, password):
+            assert username == "user"
+            assert password == "pass"
+            calls["login"] += 1
+
+        def send_message(self, msg):
+            assert msg["Subject"] == "Test Subject"
+            calls["send"] += 1
+
+    monkeypatch.setattr(tbm_app, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_HOST", "smtp.test.local")
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_PORT", 587)
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_USERNAME", "user")
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_PASSWORD", "pass")
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_USE_TLS", True)
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_USE_SSL", False)
+    monkeypatch.setattr(tbm_app, "EMAIL_FROM_ADDRESS", "noreply@test.local")
+    monkeypatch.setattr(tbm_app, "EMAIL_FROM_NAME", "TBM Test")
+    monkeypatch.setattr(tbm_app, "EMAIL_REPLY_TO", "")
+    monkeypatch.setattr(tbm_app, "EMAIL_TIMEOUT_SEC", 8)
+    monkeypatch.setattr(tbm_app.smtplib, "SMTP", FakeSMTP)
+
+    ok = tbm_app._smtp_send_email(to_addrs=["owner@example.com"], subject="Test Subject", body_text="hello")
+    assert ok is True
+    assert calls["starttls"] == 1
+    assert calls["login"] == 1
+    assert calls["send"] == 1
+
+
+def test_smtp_send_email_failure_returns_false(monkeypatch):
+    class BoomSMTP:
+        def __init__(self, host, port, timeout):
+            raise RuntimeError("smtp down")
+
+    monkeypatch.setattr(tbm_app, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_HOST", "smtp.test.local")
+    monkeypatch.setattr(tbm_app, "EMAIL_FROM_ADDRESS", "noreply@test.local")
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_USE_SSL", False)
+    monkeypatch.setattr(tbm_app.smtplib, "SMTP", BoomSMTP)
+
+    ok = tbm_app._smtp_send_email(to_addrs=["owner@example.com"], subject="Test Subject", body_text="hello")
+    assert ok is False
+
+
+def test_build_reservation_email_context_single_and_multi():
+    requester = {"name": "Owner One", "email": "owner1@example.com"}
+    rows = [
+        {
+            "id": 101,
+            "dep_icao": "KCAK",
+            "dest_icao": "KSRQ",
+            "start_utc": "2030-02-01T14:00:00+00:00",
+            "end_utc": "2030-02-01T17:00:00+00:00",
+            "notes": "First leg",
+        },
+        {
+            "id": 102,
+            "dep_icao": "KSRQ",
+            "dest_icao": "KCAK",
+            "start_utc": "2030-02-02T14:00:00+00:00",
+            "end_utc": "2030-02-02T17:00:00+00:00",
+            "notes": "",
+        },
+    ]
+    context = tbm_app._build_reservation_email_context(rows, requester)
+    assert context["requester_email"] == "owner1@example.com"
+    assert context["reservation_ids"] == [101, 102]
+    assert len(context["legs"]) == 2
+    assert context["legs"][0]["dep_icao"] == "KCAK"
+
+
+def test_send_requester_decision_email_builds_subject(monkeypatch):
+    sent = {}
+    monkeypatch.setattr(
+        tbm_app,
+        "_smtp_send_email",
+        lambda *, to_addrs, subject, body_text, **_kwargs: sent.update({"to": to_addrs, "subject": subject, "body": body_text}) or True,
+    )
+    monkeypatch.setattr(tbm_app, "EMAIL_SUBJECT_PREFIX", "[TBM]")
+    context = {
+        "requester_name": "Owner One",
+        "requester_email": "owner1@example.com",
+        "reservation_id": 101,
+        "dep_icao": "KCAK",
+        "dest_icao": "KSRQ",
+        "start_display": "02-01-2030 09:00",
+        "end_display": "02-01-2030 12:00",
+        "timezone": "America/New_York",
+    }
+    ok = tbm_app._send_requester_decision_email(
+        context,
+        decision="approved",
+        decision_note="",
+        actor_name="Admin",
+        source="reservation_approved",
+    )
+    assert ok is True
+    assert sent["to"] == ["owner1@example.com"]
+    assert sent["subject"] == "[TBM] Trip request approved"
 
 
 @pytest.fixture
@@ -256,6 +385,320 @@ def test_api_nearest_airports_widens_search_pool_for_towered(monkeypatch):
     assert len(data["airports"]) == 1
     assert data["airports"][0]["icao"] == "KTTT"
     assert data["filters"]["search_pool"] >= 80
+
+
+def test_api_nearest_airports_accepts_selected_lat_lon(monkeypatch):
+    client = tbm_app.app.test_client()
+
+    monkeypatch.setattr(tbm_app, "geocode_address", lambda _address: None)
+    monkeypatch.setattr(
+        tbm_app,
+        "nearest_airports",
+        lambda lat, lon, limit=8: [
+            {"icao": "KAAA", "label": "AAA", "distance_nm": 10.0, "lat": 1.0, "lon": 1.0},
+            {"icao": "KBBB", "label": "BBB", "distance_nm": 15.0, "lat": 2.0, "lon": 2.0},
+        ],
+    )
+    monkeypatch.setattr(
+        tbm_app,
+        "fetch_airport_ops_metadata",
+        lambda icaos: {
+            "KAAA": {"max_runway_ft": 6000, "runway_count": 1, "paved_runway": True, "jet_fuel": True, "towered": True},
+            "KBBB": {"max_runway_ft": 4500, "runway_count": 1, "paved_runway": True, "jet_fuel": True, "towered": True},
+        },
+    )
+
+    resp = client.get("/api/nearest-airports?address=Chosen+Suggestion&lat=40.1&lon=-81.2&limit=2")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["resolved_address"] == "Chosen Suggestion"
+    assert len(data["airports"]) >= 1
+
+
+def test_api_nearest_airports_accepts_google_place_id(monkeypatch):
+    client = tbm_app.app.test_client()
+    monkeypatch.setattr(
+        tbm_app,
+        "_google_place_details_geocode",
+        lambda place_id, query=None: {
+            "query": query or place_id,
+            "display_name": "4365 STATE RTE 39, MILLERSBURG, OH, 44654",
+            "lat": 40.5489,
+            "lon": -81.7785,
+            "place_id": place_id,
+        },
+    )
+    monkeypatch.setattr(
+        tbm_app,
+        "nearest_airports",
+        lambda lat, lon, limit=8: [
+            {"icao": "KAAA", "label": "AAA", "distance_nm": 10.0, "lat": 1.0, "lon": 1.0},
+        ],
+    )
+    monkeypatch.setattr(
+        tbm_app,
+        "fetch_airport_ops_metadata",
+        lambda icaos: {"KAAA": {"max_runway_ft": 6000, "runway_count": 1, "paved_runway": True, "jet_fuel": True, "towered": True}},
+    )
+
+    resp = client.get("/api/nearest-airports?address=Chosen+Suggestion&place_id=abc123&limit=1")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["resolved_address"].startswith("4365 STATE RTE 39")
+    assert len(data["airports"]) == 1
+
+
+def test_geocode_address_prefers_specific_street_number(monkeypatch):
+    query = "125 Main St Berlin OH unit-test"
+    monkeypatch.setattr(tbm_app, "_location_query_candidates", lambda _q: [_q])
+    monkeypatch.setattr(
+        tbm_app,
+        "_nominatim_search",
+        lambda _q, limit=6: [
+            {
+                "display_name": "West Main Street, Berlin, Holmes County, Ohio, 44610, United States",
+                "lat": "40.56",
+                "lon": "-81.80",
+                "importance": 0.9,
+                "class": "highway",
+                "type": "residential",
+                "address": {"road": "West Main Street", "city": "Berlin", "state": "Ohio", "postcode": "44610"},
+            },
+            {
+                "display_name": "125, East Main Street, Berlin Heights, Berlin Township, Ohio, 44814, United States",
+                "lat": "40.57",
+                "lon": "-81.79",
+                "importance": 0.3,
+                "class": "place",
+                "type": "house",
+                "address": {
+                    "house_number": "125",
+                    "road": "East Main Street",
+                    "city": "Berlin Heights",
+                    "state": "Ohio",
+                    "postcode": "44814",
+                },
+            },
+        ],
+    )
+
+    resolved = tbm_app.geocode_address(query)
+    assert resolved is not None
+    assert float(resolved["lat"]) == 40.57
+    assert float(resolved["lon"]) == -81.79
+
+
+def test_geocode_address_provider_order_prefers_google(monkeypatch):
+    query = "4365 State Route 39 Millersburg OH 44654"
+    monkeypatch.setattr(tbm_app, "GOOGLE_MAPS_API_KEY", "unit-test-key")
+    monkeypatch.setattr(tbm_app, "GEOCODE_PROVIDER_ORDER_RAW", "google,nominatim,census")
+    with tbm_app._GEOCODE_CACHE_LOCK:
+        tbm_app._GEOCODE_CACHE.clear()
+
+    monkeypatch.setattr(
+        tbm_app,
+        "_google_geocode_address",
+        lambda _q: (
+            {
+                "query": _q,
+                "display_name": "4365 STATE RTE 39, MILLERSBURG, OH, 44654",
+                "lat": 40.5489,
+                "lon": -81.7785,
+            },
+            True,
+        ),
+    )
+    monkeypatch.setattr(tbm_app, "_nominatim_geocode_address", lambda _q: (None, False))
+    monkeypatch.setattr(tbm_app, "_census_geocode_address", lambda _q: None)
+
+    resolved = tbm_app.geocode_address(query)
+    assert resolved is not None
+    assert resolved["display_name"].startswith("4365 STATE RTE 39")
+
+
+def test_geocode_address_provider_order_falls_through_on_google_miss(monkeypatch):
+    query = "4365 State Route 39 Millersburg OH 44654"
+    monkeypatch.setattr(tbm_app, "GOOGLE_MAPS_API_KEY", "unit-test-key")
+    monkeypatch.setattr(tbm_app, "GEOCODE_PROVIDER_ORDER_RAW", "google,nominatim,census")
+    with tbm_app._GEOCODE_CACHE_LOCK:
+        tbm_app._GEOCODE_CACHE.clear()
+
+    monkeypatch.setattr(tbm_app, "_google_geocode_address", lambda _q: (None, False))
+    monkeypatch.setattr(
+        tbm_app,
+        "_nominatim_geocode_address",
+        lambda _q: (
+            {
+                "query": _q,
+                "display_name": "US 62;SR 39, Millersburg, Ohio, 44654",
+                "lat": 40.5563,
+                "lon": -81.8984,
+            },
+            True,
+        ),
+    )
+    monkeypatch.setattr(tbm_app, "_census_geocode_address", lambda _q: None)
+
+    resolved = tbm_app.geocode_address(query)
+    assert resolved is not None
+    assert resolved["display_name"].startswith("US 62;SR 39")
+
+
+def test_location_query_candidates_expand_us_address_variants():
+    candidates = tbm_app._location_query_candidates("4365 State Route 39 Millersburg OH 44654")
+    assert "4365 State Route 39, Millersburg, OH 44654" in candidates
+    assert "4365 State Route 39, Millersburg, OH 44654, USA" in candidates
+    assert any("SR 39" in item for item in candidates)
+
+
+def test_suggest_addresses_blocks_street_number_without_locality(monkeypatch):
+    query = "5737 county road 203"
+    monkeypatch.setattr(tbm_app, "_nominatim_search", lambda _q, limit=6: [{"display_name": "should-not-be-used"}])
+    monkeypatch.setattr(
+        tbm_app,
+        "_google_geocode_address",
+        lambda _q: (
+            {"query": _q, "display_name": "should-not-be-used", "lat": 1.0, "lon": 1.0},
+            True,
+        ),
+    )
+    out = tbm_app.suggest_addresses(query, limit=5)
+    assert out == []
+
+
+def test_has_locality_hint_for_street_query():
+    assert tbm_app._has_locality_hint_for_street_query("5737 county road 203, Millersburg")
+    assert tbm_app._has_locality_hint_for_street_query("5737 county road 203 Millersburg OH")
+    assert tbm_app._has_locality_hint_for_street_query("5737 county road 203 44654")
+    assert not tbm_app._has_locality_hint_for_street_query("5737 county road 203")
+
+
+def test_geocode_address_uses_census_fallback_for_low_confidence(monkeypatch):
+    query = "4365 State Route 39 Millersburg OH 44654"
+    monkeypatch.setattr(tbm_app, "_location_query_candidates", lambda _q: [_q])
+    monkeypatch.setattr(
+        tbm_app,
+        "_nominatim_search",
+        lambda _q, limit=6: [
+            {
+                "display_name": "State Route 39, Holmes County, Ohio, United States",
+                "lat": "40.5655",
+                "lon": "-81.8801",
+                "importance": 0.5,
+                "class": "highway",
+                "type": "tertiary",
+                "address": {"road": "State Route 39", "state": "Ohio"},
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        tbm_app,
+        "_census_geocode_search",
+        lambda _q: [
+            {
+                "matchedAddress": "4365 STATE ROUTE 39, MILLERSBURG, OH, 44654",
+                "coordinates": {"x": -81.879, "y": 40.562},
+            }
+        ],
+    )
+
+    resolved = tbm_app.geocode_address(query)
+    assert resolved is not None
+    assert resolved["display_name"].startswith("4365 STATE ROUTE 39")
+    assert float(resolved["lat"]) == 40.562
+    assert float(resolved["lon"]) == -81.879
+
+
+def test_suggest_addresses_uses_census_fallback_when_nominatim_empty(monkeypatch):
+    query = "4365 State Route 39 Millersburg OH 44654"
+    monkeypatch.setattr(tbm_app, "_location_query_candidates", lambda _q: [_q])
+    monkeypatch.setattr(tbm_app, "_nominatim_search", lambda _q, limit=6: [])
+    monkeypatch.setattr(
+        tbm_app,
+        "_census_geocode_search",
+        lambda _q: [
+            {
+                "matchedAddress": "4365 STATE ROUTE 39, MILLERSBURG, OH, 44654",
+                "coordinates": {"x": -81.879, "y": 40.562},
+            }
+        ],
+    )
+
+    out = tbm_app.suggest_addresses(query, limit=3)
+    assert len(out) == 1
+    assert "4365 STATE ROUTE 39" in out[0]["display_name"]
+    assert float(out[0]["lat"]) == 40.562
+
+
+def test_suggest_addresses_prefers_census_when_nominatim_top_is_not_specific(monkeypatch):
+    query = "4365 State Route 39 Millersburg OH 44654"
+    monkeypatch.setattr(tbm_app, "_location_query_candidates", lambda _q: [_q])
+    monkeypatch.setattr(
+        tbm_app,
+        "_nominatim_search",
+        lambda _q, limit=6: [
+            {
+                "display_name": "State Route 39, Holmes County, Ohio, United States",
+                "lat": "40.5655",
+                "lon": "-81.8801",
+                "importance": 0.7,
+                "class": "highway",
+                "type": "tertiary",
+                "address": {"road": "State Route 39", "state": "Ohio"},
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        tbm_app,
+        "_census_geocode_search",
+        lambda _q: [
+            {
+                "matchedAddress": "4365 STATE ROUTE 39, MILLERSBURG, OH, 44654",
+                "coordinates": {"x": -81.879, "y": 40.562},
+            }
+        ],
+    )
+
+    out = tbm_app.suggest_addresses(query, limit=3)
+    assert len(out) >= 1
+    assert out[0]["display_name"].startswith("4365 STATE ROUTE 39")
+
+
+def test_suggest_addresses_prepends_google_result(monkeypatch):
+    query = "4365 State Route 39 Millersburg OH 44654"
+    monkeypatch.setattr(tbm_app, "GOOGLE_MAPS_API_KEY", "unit-test-key")
+    monkeypatch.setattr(tbm_app, "GEOCODE_PROVIDER_ORDER_RAW", "google,nominatim,census")
+    with tbm_app._GEOCODE_SUGGEST_CACHE_LOCK:
+        tbm_app._GEOCODE_SUGGEST_CACHE.clear()
+
+    monkeypatch.setattr(
+        tbm_app,
+        "_google_places_autocomplete",
+        lambda _q, limit=6: [
+            {"display_name": "4365 STATE RTE 39, MILLERSBURG, OH, 44654", "place_id": "pid-1"},
+        ],
+    )
+    monkeypatch.setattr(
+        tbm_app,
+        "_nominatim_search",
+        lambda _q, limit=6: [
+            {
+                "display_name": "US 62;SR 39, Millersburg, Ohio, 44654",
+                "lat": "40.5563",
+                "lon": "-81.8984",
+                "importance": 0.4,
+                "class": "highway",
+                "type": "tertiary",
+                "address": {"road": "State Route 39", "city": "Millersburg", "state": "Ohio", "postcode": "44654"},
+            }
+        ],
+    )
+    monkeypatch.setattr(tbm_app, "_census_geocode_search", lambda _q: [])
+
+    out = tbm_app.suggest_addresses(query, limit=3)
+    assert len(out) >= 1
+    assert out[0]["display_name"].startswith("4365 STATE RTE 39")
+    assert out[0]["place_id"] == "pid-1"
 
 
 def test_api_nearest_airports_rejects_short_address():

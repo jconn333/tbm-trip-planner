@@ -402,8 +402,9 @@
 
     function setupAddressAutocomplete(inputEl, sugEl) {
       let debounceTimer = null;
+      let requestSeq = 0;
 
-      function close(){ sugEl.style.display="none"; sugEl.innerHTML=""; }
+      function close(){ clearTimeout(debounceTimer); sugEl.style.display="none"; sugEl.innerHTML=""; }
       function open(){ sugEl.style.display="block"; }
 
       async function fetchAddresses(q){
@@ -413,18 +414,33 @@
       }
 
       function pick(item){
+        clearTimeout(debounceTimer);
+        requestSeq += 1;
         inputEl.value = item.display_name;
+        inputEl.dataset.selectedPlaceId = String(item.place_id || "");
+        inputEl.dataset.selectedLat = String(item.lat || "");
+        inputEl.dataset.selectedLon = String(item.lon || "");
+        if (inputEl.dataset.selectedPlaceId) {
+          inputEl.dataset.selectedLat = "";
+          inputEl.dataset.selectedLon = "";
+        }
         close();
         inputEl.focus();
       }
 
       inputEl.addEventListener("input", () => {
         const q = (inputEl.value || "").trim();
+        inputEl.dataset.selectedPlaceId = "";
+        inputEl.dataset.selectedLat = "";
+        inputEl.dataset.selectedLon = "";
         clearTimeout(debounceTimer);
         if(q.length < 3){ close(); return; }
 
+        const seq = ++requestSeq;
         debounceTimer = setTimeout(async () => {
           const items = await fetchAddresses(q);
+          if(seq !== requestSeq) return;
+          if(((inputEl.value || "").trim()) !== q) return;
           if(!items || items.length === 0){ close(); return; }
           sugEl.innerHTML = "";
           items.forEach(it => {
@@ -441,6 +457,7 @@
       inputEl.addEventListener("blur", () => setTimeout(close, 120));
       inputEl.addEventListener("focus", () => {
         const q = (inputEl.value || "").trim();
+        if(inputEl.dataset.selectedPlaceId || inputEl.dataset.selectedLat || inputEl.dataset.selectedLon) return;
         if(q.length >= 3 && sugEl.innerHTML.trim()) open();
       });
       document.addEventListener("keydown", (e) => { if(e.key === "Escape") close(); });
@@ -536,6 +553,15 @@
           towered_only: toweredOnlyEl.checked ? "true" : "false",
           limit: "8",
         });
+        const selectedLat = parseFloat(addressLookupInput.dataset.selectedLat || "");
+        const selectedLon = parseFloat(addressLookupInput.dataset.selectedLon || "");
+        const selectedPlaceId = (addressLookupInput.dataset.selectedPlaceId || "").trim();
+        if (selectedPlaceId) {
+          params.set("place_id", selectedPlaceId);
+        } else if (Number.isFinite(selectedLat) && Number.isFinite(selectedLon)) {
+          params.set("lat", String(selectedLat));
+          params.set("lon", String(selectedLon));
+        }
         const res = await fetch(`/api/nearest-airports?${params.toString()}`);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {

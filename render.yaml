@@ -1,6 +1,61 @@
 services:
   - type: web
     name: tbm-trip-bot
-    env: python
+    runtime: python
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn wsgi:app
+    healthCheckPath: /health
+    disk:
+      name: tbm-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: FLASK_DEBUG
+        value: "false"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: TBM_DB_PATH
+        value: /var/data/tbm.sqlite3
+      - key: TBM_HOME_TZ
+        value: America/New_York
+      - key: TBM_ENABLE_RATE_LIMIT
+        value: "true"
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: TBM_BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: TBM_BOOTSTRAP_ADMIN_NAME
+        sync: false
+      - key: TBM_BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: EMAIL_ENABLED
+        value: "false"
+      - key: EMAIL_SMTP_HOST
+        sync: false
+      - key: EMAIL_SMTP_PORT
+        value: "587"
+      - key: EMAIL_SMTP_USERNAME
+        sync: false
+      - key: EMAIL_SMTP_PASSWORD
+        sync: false
+      - key: EMAIL_SMTP_USE_TLS
+        value: "true"
+      - key: EMAIL_SMTP_USE_SSL
+        value: "false"
+      - key: EMAIL_FROM_ADDRESS
+        sync: false
+      - key: EMAIL_FROM_NAME
+        value: TBM Flight Portal
+      - key: EMAIL_REPLY_TO
+        sync: false
+      - key: EMAIL_TIMEOUT_SEC
+        value: "8"
+      - key: EMAIL_SUBJECT_PREFIX
+        sync: false
+      - key: EMAIL_ADMIN_REVIEW_URL
+        sync: false

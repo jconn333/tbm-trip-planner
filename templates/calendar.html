@@ -194,6 +194,11 @@
   background: color-mix(in srgb, var(--color-surface-soft) 74%, white);
   padding:8px 10px;
 }
+.reservationRoute{display:flex;align-items:flex-start;gap:10px}
+.reservationRouteStop{display:flex;flex-direction:column;min-width:86px}
+.reservationRouteCode{line-height:1.1}
+.reservationRouteLoc{margin-top:4px;color:var(--muted);font-size:12px;line-height:1.2}
+.reservationRouteArrow{color:var(--muted);font-size:16px;line-height:1.1;padding-top:1px}
 .reservationDetailItem.full{ grid-column:1 / -1; }
 .reservationStatus{
   display:inline-flex;
@@ -314,6 +319,18 @@
     <div id="detailMsg" class="msg"></div>
   </div>
 </section>
+
+<section id="requestSuccessModal" class="modal">
+  <div class="modalCard">
+    <div class="actions" style="justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <h3 style="margin:0;">Request submitted</h3>
+      <button class="btn" id="requestSuccessCloseBtn" type="button">OK</button>
+    </div>
+    <div class="kv">
+      The admin has been notified. Your trip is pending until approved or denied.
+    </div>
+  </div>
+</section>
 {% endblock %}
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
@@ -344,6 +361,8 @@
     availabilityMeta: document.getElementById('availabilityMeta'),
     reservationDetailModal: document.getElementById('reservationDetailModal'),
     reservationDetailBody: document.getElementById('reservationDetailBody'),
+    requestSuccessModal: document.getElementById('requestSuccessModal'),
+    requestSuccessCloseBtn: document.getElementById('requestSuccessCloseBtn'),
     detailCloseBtn: document.getElementById('detailCloseBtn'),
     detailViewBtn: document.getElementById('detailViewBtn'),
     detailCancelBtn: document.getElementById('detailCancelBtn'),
@@ -455,18 +474,41 @@
     setDetailMsg('');
   }
 
+  function openRequestSuccessModal(){
+    if(el.requestSuccessModal){ el.requestSuccessModal.classList.add('open'); }
+  }
+
+  function closeRequestSuccessModal(){
+    if(el.requestSuccessModal){ el.requestSuccessModal.classList.remove('open'); }
+  }
+
   function openReservationDetailModal(reservation){
     selectedReservation = reservation;
     const status = escapeHtml(String(reservation.status || '').toUpperCase());
     const owner = escapeHtml(reservation.traveling_owner || 'Unknown');
     const dep = escapeHtml(reservation.dep_icao || '');
+    const depLocation = escapeHtml(reservation.dep_location || '');
     const dest = escapeHtml(reservation.dest_icao || '');
+    const destLocation = escapeHtml(reservation.dest_location || '');
     const parked = escapeHtml(reservation.parked_icao || '');
     const notes = escapeHtml(reservation.notes || '');
     const startDisplay = escapeHtml(formatLocalDisplay(reservation.start));
     const endDisplay = escapeHtml(formatLocalDisplay(reservation.end));
     el.reservationDetailBody.innerHTML = `
-      <div class="reservationDetailItem"><strong>Route</strong><div>${dep} → ${dest}</div></div>
+      <div class="reservationDetailItem">
+        <strong>Route</strong>
+        <div class="reservationRoute">
+          <span class="reservationRouteStop">
+            <span class="reservationRouteCode">${dep}</span>
+            <span class="reservationRouteLoc">${depLocation || '&nbsp;'}</span>
+          </span>
+          <span class="reservationRouteArrow">→</span>
+          <span class="reservationRouteStop">
+            <span class="reservationRouteCode">${dest}</span>
+            <span class="reservationRouteLoc">${destLocation || '&nbsp;'}</span>
+          </span>
+        </div>
+      </div>
       <div class="reservationDetailItem"><strong>Owner</strong><div>${owner}</div></div>
       <div class="reservationDetailItem"><strong>Start</strong><div>${startDisplay}</div></div>
       <div class="reservationDetailItem"><strong>End</strong><div>${endDisplay}</div></div>
@@ -792,6 +834,10 @@
     const params = new URLSearchParams(window.location.search);
     const token = (params.get('draft') || '').trim();
     if(!token) return;
+    if(el.requestTripDisclosure && !el.requestTripDisclosure.open){
+      el.requestTripDisclosure.open = true;
+      syncSidebarExpansionState();
+    }
     activeDraftToken = token;
     const resp = await fetch(`/api/planner/quote-drafts/${encodeURIComponent(token)}`);
     const data = await resp.json().catch(()=>({}));
@@ -890,7 +936,9 @@
         start: event.startStr,
         end: event.endStr,
         dep_icao: event.extendedProps.dep_icao,
+        dep_location: event.extendedProps.dep_location,
         dest_icao: event.extendedProps.dest_icao,
+        dest_location: event.extendedProps.dest_location,
         parked_icao: event.extendedProps.parked_icao,
         traveling_owner: event.extendedProps.traveling_owner,
         notes: event.extendedProps.notes || '',
@@ -943,7 +991,8 @@
         setMsg(data.error || 'Draft submission failed.', true);
         return;
       }
-      setMsg('Roundtrip requests submitted from quote draft.');
+      setMsg('');
+      openRequestSuccessModal();
       activeDraftData = null;
       activeDraftToken = '';
       renderDraftPanel();
@@ -1001,12 +1050,14 @@
     if(editingId){
       setMsg('Pending request updated and re-submitted.');
     } else if(isOneWayDraftSubmit){
-      setMsg('Reservation request submitted from quote draft.');
+      setMsg('');
+      openRequestSuccessModal();
       activeDraftData = null;
       activeDraftToken = '';
       renderDraftPanel();
     } else {
-      setMsg('Reservation request submitted.');
+      setMsg('');
+      openRequestSuccessModal();
     }
     resetForm();
     calendar.refetchEvents();
@@ -1027,11 +1078,21 @@
   });
 
   el.detailCloseBtn.addEventListener('click', () => closeReservationDetailModal());
+  if(el.requestSuccessCloseBtn){
+    el.requestSuccessCloseBtn.addEventListener('click', () => closeRequestSuccessModal());
+  }
   el.reservationDetailModal.addEventListener('click', (event)=>{
     if(event.target === el.reservationDetailModal){
       closeReservationDetailModal();
     }
   });
+  if(el.requestSuccessModal){
+    el.requestSuccessModal.addEventListener('click', (event)=>{
+      if(event.target === el.requestSuccessModal){
+        closeRequestSuccessModal();
+      }
+    });
+  }
   el.detailViewBtn.addEventListener('click', ()=>{
     if(!selectedReservation) return;
     window.location.href = `/reservations/${encodeURIComponent(String(selectedReservation.id || ''))}`;
@@ -1059,6 +1120,11 @@
     calendar.refetchEvents();
     loadMyPendingReservations();
     loadSummary();
+  });
+  document.addEventListener('keydown', (event)=>{
+    if(event.key === 'Escape' && el.requestSuccessModal && el.requestSuccessModal.classList.contains('open')){
+      closeRequestSuccessModal();
+    }
   });
 
   loadOwners();

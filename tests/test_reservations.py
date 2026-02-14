@@ -141,6 +141,16 @@ def test_owner_cannot_call_admin_endpoint(reservation_env):
     assert resp.status_code == 403
 
 
+def test_list_admin_users_excludes_disabled(reservation_env):
+    with storage.get_conn(reservation_env["db_path"]) as conn:
+        admins = storage.list_admin_users(conn)
+        assert len(admins) == 1
+        assert admins[0]["email"] == "admin@example.com"
+        storage.set_user_flags(conn, int(admins[0]["id"]), is_disabled=1)
+        admins_after = storage.list_admin_users(conn)
+        assert admins_after == []
+
+
 def test_reservation_request_approve_and_deny_flow(reservation_env):
     owner_client = tbm_app.app.test_client()
     _login(owner_client, "owner1@example.com", "ownerpass123")
@@ -171,6 +181,85 @@ def test_reservation_request_approve_and_deny_flow(reservation_env):
     assert deny.get_json()["reservation"]["status"] == "denied"
 
 
+def test_approve_sends_requester_decision_notification(reservation_env, monkeypatch):
+    owner_client = tbm_app.app.test_client()
+    admin_client = tbm_app.app.test_client()
+    _login(owner_client, "owner1@example.com", "ownerpass123")
+    _login(admin_client, "admin@example.com", "adminpass123")
+
+    start = datetime.now() + timedelta(days=3)
+    end = start + timedelta(hours=2)
+    create = owner_client.post("/api/reservation-requests", json=_reservation_payload(start, end))
+    assert create.status_code == 201
+    reservation_id = int(create.get_json()["reservation"]["id"])
+
+    captured = {"called": 0, "decision": ""}
+
+    def fake_send(_context, *, decision, decision_note, actor_name, source, actor_user_id=None):
+        captured["called"] += 1
+        captured["decision"] = decision
+        assert actor_name == "Admin"
+        assert decision_note == ""
+        assert source == "reservation_approved"
+        return True
+
+    monkeypatch.setattr(tbm_app, "_send_requester_decision_email", fake_send)
+
+    approve = admin_client.post(f"/api/reservations/{reservation_id}/approve")
+    assert approve.status_code == 200
+    assert captured["called"] == 1
+    assert captured["decision"] == "approved"
+
+
+def test_deny_sends_requester_decision_notification_with_note(reservation_env, monkeypatch):
+    owner_client = tbm_app.app.test_client()
+    admin_client = tbm_app.app.test_client()
+    _login(owner_client, "owner1@example.com", "ownerpass123")
+    _login(admin_client, "admin@example.com", "adminpass123")
+
+    start = datetime.now() + timedelta(days=3)
+    end = start + timedelta(hours=2)
+    create = owner_client.post("/api/reservation-requests", json=_reservation_payload(start, end))
+    assert create.status_code == 201
+    reservation_id = int(create.get_json()["reservation"]["id"])
+
+    captured = {"called": 0, "decision": "", "note": ""}
+
+    def fake_send(_context, *, decision, decision_note, actor_name, source, actor_user_id=None):
+        captured["called"] += 1
+        captured["decision"] = decision
+        captured["note"] = decision_note
+        assert actor_name == "Admin"
+        assert source == "reservation_denied"
+        return True
+
+    monkeypatch.setattr(tbm_app, "_send_requester_decision_email", fake_send)
+
+    deny = admin_client.post(f"/api/reservations/{reservation_id}/deny", json={"note": "Weather risk"})
+    assert deny.status_code == 200
+    assert captured["called"] == 1
+    assert captured["decision"] == "denied"
+    assert captured["note"] == "Weather risk"
+
+
+def test_decision_notification_fail_open(reservation_env, monkeypatch):
+    owner_client = tbm_app.app.test_client()
+    admin_client = tbm_app.app.test_client()
+    _login(owner_client, "owner1@example.com", "ownerpass123")
+    _login(admin_client, "admin@example.com", "adminpass123")
+
+    start = datetime.now() + timedelta(days=3)
+    end = start + timedelta(hours=2)
+    create = owner_client.post("/api/reservation-requests", json=_reservation_payload(start, end))
+    assert create.status_code == 201
+    reservation_id = int(create.get_json()["reservation"]["id"])
+
+    monkeypatch.setattr(tbm_app, "_build_reservation_decision_email_context", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    approve = admin_client.post(f"/api/reservations/{reservation_id}/approve")
+    assert approve.status_code == 200
+
+
 def test_overlap_blocking_and_nonblocking_statuses(reservation_env):
     owner_client = tbm_app.app.test_client()
     _login(owner_client, "owner1@example.com", "ownerpass123")
@@ -197,6 +286,60 @@ def test_overlap_blocking_and_nonblocking_statuses(reservation_env):
         json=_reservation_payload(start + timedelta(minutes=30), end + timedelta(minutes=30)),
     )
     assert after_deny.status_code == 201
+
+
+def test_direct_request_notifications_fail_open_when_email_helper_errors(reservation_env, monkeypatch):
+    owner_client = tbm_app.app.test_client()
+    _login(owner_client, "owner1@example.com", "ownerpass123")
+
+    monkeypatch.setattr(tbm_app, "_build_reservation_email_context", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    start = datetime.now() + timedelta(days=2)
+    end = start + timedelta(hours=1)
+    resp = owner_client.post("/api/reservation-requests", json=_reservation_payload(start, end))
+    assert resp.status_code == 201
+
+
+def test_direct_request_notifications_include_single_leg(reservation_env, monkeypatch):
+    owner_client = tbm_app.app.test_client()
+    _login(owner_client, "owner1@example.com", "ownerpass123")
+
+    captured = {}
+
+    def fake_context(created_rows, requester_user):
+        rows = list(created_rows or [])
+        captured["count"] = len(rows)
+        captured["requester"] = requester_user.get("email")
+        return {
+            "requester_name": "Owner One",
+            "requester_email": "owner1@example.com",
+            "reservation_ids": [int(rows[0]["id"])],
+            "legs": [{"reservation_id": int(rows[0]["id"]), "dep_icao": "KCAK", "dest_icao": "KSRQ", "start_display": "", "end_display": "", "notes": ""}],
+            "review_url": "/admin",
+            "timezone": "America/New_York",
+        }
+
+    calls = {"requester": 0, "admin": 0}
+    monkeypatch.setattr(tbm_app, "_build_reservation_email_context", fake_context)
+    monkeypatch.setattr(
+        tbm_app,
+        "_send_requester_submission_email",
+        lambda _ctx, *, source, actor_user_id=None: calls.__setitem__("requester", calls["requester"] + 1) or True,
+    )
+    monkeypatch.setattr(
+        tbm_app,
+        "_send_admin_new_request_email",
+        lambda _ctx, _emails, *, source, actor_user_id=None: calls.__setitem__("admin", calls["admin"] + 1) or True,
+    )
+
+    start = datetime.now() + timedelta(days=3)
+    end = start + timedelta(hours=1)
+    resp = owner_client.post("/api/reservation-requests", json=_reservation_payload(start, end))
+    assert resp.status_code == 201
+    assert captured["count"] == 1
+    assert captured["requester"] == "owner1@example.com"
+    assert calls["requester"] == 1
+    assert calls["admin"] == 1
 
 
 def test_approve_rechecks_overlap_conflicts(reservation_env):
@@ -565,6 +708,46 @@ def test_quote_draft_create_and_get(reservation_env):
     assert draft["trip_type"] == "oneway"
     assert draft["legs"][0]["dep_icao"] == "KCAK"
     assert draft["legs"][0]["dest_icao"] == "KSRQ"
+    assert draft["legs"][0]["notes"] == ""
+
+
+def test_quote_draft_oneway_submit_notifications_single_leg(reservation_env, monkeypatch):
+    owner_client = tbm_app.app.test_client()
+    _login(owner_client, "owner1@example.com", "ownerpass123")
+
+    depart_dt = _to_quarter(datetime.now() + timedelta(days=2, hours=1))
+    estimate = _quote_estimate_payload("oneway", depart_dt)
+    create = owner_client.post(
+        "/api/planner/quote-drafts",
+        json={
+            "estimate": estimate,
+            "outbound_departure_local": depart_dt.strftime("%Y-%m-%dT%H:%M"),
+        },
+    )
+    assert create.status_code == 201
+    token = create.get_json()["token"]
+
+    captured = {"count": 0}
+    monkeypatch.setattr(
+        tbm_app,
+        "_build_reservation_email_context",
+        lambda created_rows, requester_user: (
+            captured.__setitem__("count", len(list(created_rows or []))) or {
+                "requester_name": requester_user.get("name"),
+                "requester_email": requester_user.get("email"),
+                "reservation_ids": [],
+                "legs": [],
+                "review_url": "/admin",
+                "timezone": "America/New_York",
+            }
+        ),
+    )
+    monkeypatch.setattr(tbm_app, "_send_requester_submission_email", lambda _ctx, *, source, actor_user_id=None: True)
+    monkeypatch.setattr(tbm_app, "_send_admin_new_request_email", lambda _ctx, _emails, *, source, actor_user_id=None: True)
+
+    submit = owner_client.post(f"/api/planner/quote-drafts/{token}/submit")
+    assert submit.status_code == 200
+    assert captured["count"] == 1
 
 
 def test_quote_draft_roundtrip_requires_return_departure(reservation_env):
@@ -672,3 +855,66 @@ def test_roundtrip_quote_submit_is_atomic_when_overlap_exists(reservation_env):
             (reservation_env["owner1"],),
         ).fetchall()
     assert len(owner1_rows) == 0
+
+
+def test_quote_draft_roundtrip_submit_notifications_bundled(reservation_env, monkeypatch):
+    owner_client = tbm_app.app.test_client()
+    _login(owner_client, "owner1@example.com", "ownerpass123")
+
+    depart_dt = _to_quarter(datetime.now() + timedelta(days=9, hours=2))
+    return_depart_dt = depart_dt + timedelta(days=1, hours=2)
+    estimate = _quote_estimate_payload("roundtrip", depart_dt, return_depart_dt)
+    create = owner_client.post(
+        "/api/planner/quote-drafts",
+        json={
+            "estimate": estimate,
+            "outbound_departure_local": depart_dt.strftime("%Y-%m-%dT%H:%M"),
+            "return_departure_local": return_depart_dt.strftime("%Y-%m-%dT%H:%M"),
+        },
+    )
+    assert create.status_code == 201
+    token = create.get_json()["token"]
+
+    captured = {"count": 0}
+    monkeypatch.setattr(
+        tbm_app,
+        "_build_reservation_email_context",
+        lambda created_rows, requester_user: (
+            captured.__setitem__("count", len(list(created_rows or []))) or {
+                "requester_name": requester_user.get("name"),
+                "requester_email": requester_user.get("email"),
+                "reservation_ids": [],
+                "legs": [],
+                "review_url": "/admin",
+                "timezone": "America/New_York",
+            }
+        ),
+    )
+    monkeypatch.setattr(tbm_app, "_send_requester_submission_email", lambda _ctx, *, source, actor_user_id=None: True)
+    monkeypatch.setattr(tbm_app, "_send_admin_new_request_email", lambda _ctx, _emails, *, source, actor_user_id=None: True)
+
+    submit = owner_client.post(f"/api/planner/quote-drafts/{token}/submit")
+    assert submit.status_code == 200
+    assert captured["count"] == 2
+
+
+def test_notifications_disabled_skips_smtp_transport(reservation_env, monkeypatch):
+    owner_client = tbm_app.app.test_client()
+    _login(owner_client, "owner1@example.com", "ownerpass123")
+
+    called = {"smtp": 0}
+
+    class TrapSMTP:
+        def __init__(self, *args, **kwargs):
+            called["smtp"] += 1
+
+    monkeypatch.setattr(tbm_app, "EMAIL_ENABLED", False)
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_HOST", "smtp.test.local")
+    monkeypatch.setattr(tbm_app, "EMAIL_FROM_ADDRESS", "noreply@test.local")
+    monkeypatch.setattr(tbm_app.smtplib, "SMTP", TrapSMTP)
+
+    start = datetime.now() + timedelta(days=2)
+    end = start + timedelta(hours=1)
+    resp = owner_client.post("/api/reservation-requests", json=_reservation_payload(start, end))
+    assert resp.status_code == 201
+    assert called["smtp"] == 0

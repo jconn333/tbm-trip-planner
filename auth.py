@@ -58,4 +58,7 @@ def login_user(user_id: int) -> None:
 
 def logout_user() -> None:
     session.pop("user_id", None)
+    session.pop("impersonator_admin_user_id", None)
+    session.pop("impersonation_target_user_id", None)
+    session.pop("impersonation_started_at_utc", None)
     session.pop("csrf_token", None)

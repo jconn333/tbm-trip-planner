@@ -14,6 +14,11 @@
 .statusPill{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.18);font-size:11px;font-weight:700;letter-spacing:.01em;text-transform:uppercase}
 .noteBox{white-space:pre-wrap}
 .msg{font-size:12px;color:var(--muted);min-height:16px;margin-top:8px}
+.routeDisplay{display:flex;align-items:flex-start;gap:10px}
+.routeStop{display:flex;flex-direction:column;min-width:86px}
+.routeCode{line-height:1.1}
+.routeLoc{margin-top:4px;color:var(--muted);font-size:12px;line-height:1.2}
+.routeArrow{color:var(--muted);font-size:16px;line-height:1.1;padding-top:1px}
 @media (max-width:840px){.kvGrid{grid-template-columns:1fr}}
 {% endblock %}
 {% block content %}
@@ -27,7 +32,20 @@
     <div class="kvGrid" style="margin-top:12px;">
       <div><strong>Owner</strong><div class="meta">{{ reservation.traveling_owner }}</div></div>
       <div><strong>Requested By</strong><div class="meta">{{ reservation.requested_by }}</div></div>
-      <div><strong>Route</strong><div class="meta">{{ reservation.dep_icao }} -> {{ reservation.dest_icao }}</div></div>
+      <div>
+        <strong>Route</strong>
+        <div class="meta routeDisplay">
+          <span class="routeStop">
+            <span class="routeCode">{{ reservation.dep_icao }}</span>
+            <span class="routeLoc">{{ reservation.dep_location or "" }}</span>
+          </span>
+          <span class="routeArrow">→</span>
+          <span class="routeStop">
+            <span class="routeCode">{{ reservation.dest_icao }}</span>
+            <span class="routeLoc">{{ reservation.dest_location or "" }}</span>
+          </span>
+        </div>
+      </div>
       <div><strong>Parked</strong><div class="meta">{{ reservation.parked_icao }}</div></div>
       <div><strong>Start</strong><div class="meta">{{ reservation.start_display }}</div></div>
       <div><strong>End</strong><div class="meta">{{ reservation.end_display }}</div></div>

@@ -50,8 +50,9 @@
     .tbmCustomSelect{
       position:relative;
       width:100%;
-      z-index:50;
+      z-index:1;
     }
+    .tbmCustomSelect.is-open{ z-index:300; }
     .tbmCustomSelectBtn{
       width:100%;
       text-align:left;
@@ -71,7 +72,7 @@
       max-height:240px;
       overflow:auto;
       display:none;
-      z-index:120;
+      z-index:301;
     }
     .tbmCustomSelectMenu.open{ display:block; }
     .tbmCustomSelectOption{
@@ -83,6 +84,66 @@
       font-size:13px;
     }
     .tbmCustomSelectOption:first-child{ border-top:0; }
+    .impersonationBanner{
+      margin:10px 0 6px;
+      border:1px solid color-mix(in srgb, var(--color-border) 86%, white);
+      border-radius:12px;
+      background: color-mix(in srgb, #fff5d1 65%, white);
+      padding:10px 12px;
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .impersonationBannerTitle{
+      font-size:13px;
+      font-weight:700;
+      color:var(--color-text-strong);
+      line-height:1.3;
+    }
+    .impersonationBannerMeta{
+      margin-top:3px;
+      font-size:12px;
+      color:var(--color-muted);
+      line-height:1.35;
+    }
+    .impersonationStopBtn{
+      border:1px solid color-mix(in srgb, var(--color-border) 82%, white);
+      border-radius:999px;
+      padding:6px 10px;
+      background:var(--color-surface);
+      color:var(--color-text);
+      cursor:pointer;
+      font-size:12px;
+      white-space:nowrap;
+      flex:0 0 auto;
+    }
+    .jsHealthBanner{
+      display:none;
+      margin:10px 0 6px;
+      border:1px solid color-mix(in srgb, #e5c8a2 78%, var(--color-border));
+      border-radius:12px;
+      background: color-mix(in srgb, #fff6ea 78%, white);
+      padding:10px 12px;
+      color:var(--color-text-strong);
+      font-size:12.5px;
+      line-height:1.35;
+    }
+    .jsHealthBannerTitle{
+      font-weight:700;
+      margin-bottom:2px;
+    }
+    .jsHealthBanner.is-visible{ display:block; }
+    .noScriptBanner{
+      margin:10px 0 6px;
+      border:1px solid color-mix(in srgb, #e2acb3 72%, var(--color-border));
+      border-radius:12px;
+      background: color-mix(in srgb, #fff1f3 78%, white);
+      padding:10px 12px;
+      color:var(--color-text-strong);
+      font-size:12.5px;
+      line-height:1.35;
+    }
 
     {% block page_styles %}{% endblock %}
   </style>
@@ -138,7 +199,7 @@
               </div>
             {% endif %}
             {% if current_user %}
-              <div class="navDropdown {% if _path.startswith('/account') %}active{% endif %}">
+              <div class="navDropdown {% if _path.startswith('/account') or _path.startswith('/live-tracking') %}active{% endif %}">
                 <button
                   type="button"
                   class="navDropdownTrigger"
@@ -150,6 +211,7 @@
                 </button>
                 <div id="navAccountMenu" class="navDropdownMenu" role="menu" aria-label="Account">
                   <a href="/account" class="{% if _path.startswith('/account') %}active{% endif %}" aria-current="{% if _path.startswith('/account') %}page{% endif %}" role="menuitem">Profile</a>
+                  <a href="/live-tracking" class="{% if _path.startswith('/live-tracking') %}active{% endif %}" aria-current="{% if _path.startswith('/live-tracking') %}page{% endif %}" role="menuitem">Live</a>
                   <form method="post" action="/logout" class="navDropdownActionForm" role="none">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                     <button class="navDropdownAction" type="submit" role="menuitem">Sign out</button>
@@ -192,14 +254,15 @@
                 <button
                   type="button"
                   id="mobileAccountToggle"
-                  class="mobileAdminToggle {% if _path.startswith('/account') %}active{% endif %}"
-                  aria-expanded="{% if _path.startswith('/account') %}true{% else %}false{% endif %}"
+                  class="mobileAdminToggle {% if _path.startswith('/account') or _path.startswith('/live-tracking') %}active{% endif %}"
+                  aria-expanded="{% if _path.startswith('/account') or _path.startswith('/live-tracking') %}true{% else %}false{% endif %}"
                   aria-controls="mobileAccountLinks"
                 >
                   Account
                 </button>
-                <div id="mobileAccountLinks" class="mobileAccountLinks {% if _path.startswith('/account') %}is-open{% endif %}">
+                <div id="mobileAccountLinks" class="mobileAccountLinks {% if _path.startswith('/account') or _path.startswith('/live-tracking') %}is-open{% endif %}">
                   <a href="/account" class="mobileNavLink {% if _path.startswith('/account') %}active{% endif %}" aria-current="{% if _path.startswith('/account') %}page{% endif %}">Profile</a>
+                  <a href="/live-tracking" class="mobileNavLink {% if _path.startswith('/live-tracking') %}active{% endif %}" aria-current="{% if _path.startswith('/live-tracking') %}page{% endif %}">Live</a>
                   <form method="post" action="/logout" class="mobileAccountLogoutForm">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                     <button class="mobileNavLink mobileNavAction" type="submit">Sign out</button>
@@ -213,6 +276,37 @@
         </div>
       </div>
     </header>
+
+    {% if impersonation_active and impersonation_target %}
+      <section class="impersonationBanner" role="status" aria-live="polite">
+        <div>
+          <div class="impersonationBannerTitle">
+            Viewing as {{ impersonation_target.name }} ({{ impersonation_target.email }})
+          </div>
+          <div class="impersonationBannerMeta">
+            Started: {{ impersonation_started_at or "Unknown" }}
+            {% if impersonation_warning_flags and impersonation_warning_flags.is_disabled %}
+              | Warning: target owner is disabled.
+            {% endif %}
+            {% if impersonation_warning_flags and impersonation_warning_flags.must_reset_password %}
+              | Warning: target owner is marked must-reset-password.
+            {% endif %}
+          </div>
+        </div>
+        <button id="stopImpersonationBtn" class="impersonationStopBtn" type="button">Stop Viewing</button>
+      </section>
+    {% endif %}
+
+    <noscript>
+      <section class="noScriptBanner" role="alert">
+        JavaScript is disabled. Some features (calendar actions, address lookup, and live UI updates) will not work.
+      </section>
+    </noscript>
+
+    <section id="jsHealthBanner" class="jsHealthBanner" role="alert" aria-live="polite">
+      <div class="jsHealthBannerTitle">Some app features may be blocked by a browser extension.</div>
+      <div id="jsHealthBannerDetail">Try disabling ad/privacy blockers for this site and refresh.</div>
+    </section>
 
     <main>
       {% block content %}{% endblock %}
@@ -488,6 +582,35 @@
           mobileQuery.addListener(syncMenuForViewport);
         }
       }
+
+      const stopImpersonationBtn = document.getElementById('stopImpersonationBtn');
+      if(stopImpersonationBtn){
+        stopImpersonationBtn.addEventListener('click', async () => {
+          stopImpersonationBtn.disabled = true;
+          const resp = await fetch('/api/admin/view-as/stop', { method: 'POST' });
+          const data = await resp.json().catch(() => ({}));
+          if(!resp.ok){
+            stopImpersonationBtn.disabled = false;
+            if(window.TBMUI){ window.TBMUI.toast(data.error || 'Could not stop view-as mode.', { error: true, ttl: 3600 }); }
+            return;
+          }
+          window.location.href = '/admin';
+        });
+      }
+
+      window.setTimeout(() => {
+        const banner = document.getElementById('jsHealthBanner');
+        const detail = document.getElementById('jsHealthBannerDetail');
+        if(!(banner instanceof HTMLElement)) return;
+        const missing = [];
+        if(!window.TBMReservationUI) missing.push('reservation UI');
+        if(!window.TBMDateTimeBox) missing.push('date/time controls');
+        if(!missing.length) return;
+        if(detail instanceof HTMLElement){
+          detail.textContent = `Core scripts did not load (${missing.join(', ')}). Disable blockers for this site and refresh.`;
+        }
+        banner.classList.add('is-visible');
+      }, 250);
     })();
   </script>
   {% block scripts %}{% endblock %}

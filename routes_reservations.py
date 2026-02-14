@@ -27,6 +27,8 @@ def create_reservations_blueprint(
     can_reopen_reservation,
     utc_now,
     default_parked_icao: str,
+    notify_new_pending_reservations,
+    notify_reservation_decision,
 ):
     bp = Blueprint("reservation_routes", __name__)
 
@@ -178,6 +180,10 @@ def create_reservations_blueprint(
                 requested_by_user_id=int(current_user["id"]),
                 notes=normalized["notes"],
             )
+        try:
+            notify_new_pending_reservations(created_rows=[row], requester_user=current_user, source="direct_request")
+        except Exception:
+            pass
         return jsonify({"ok": True, "reservation": reservation_to_event_payload(row, current_user)}), 201
 
     @bp.patch("/api/reservations/<int:reservation_id>", endpoint="api_update_reservation")
@@ -431,6 +437,15 @@ def create_reservations_blueprint(
                     "decision_at_utc": utc_now().isoformat(),
                 },
             )
+        try:
+            notify_reservation_decision(
+                reservation_row=updated,
+                decision="approved",
+                decision_note="",
+                actor_user=g.current_user,
+            )
+        except Exception:
+            pass
         return jsonify({"ok": True, "reservation": reservation_to_event_payload(updated, g.current_user)})
 
     @bp.post("/api/reservations/<int:reservation_id>/deny", endpoint="api_deny_reservation")
@@ -452,6 +467,15 @@ def create_reservations_blueprint(
             if note:
                 fields["notes"] = f"{(row['notes'] or '').strip()}\\nDenied: {note}".strip()
             updated = storage.update_reservation_fields(conn, reservation_id, fields)
+        try:
+            notify_reservation_decision(
+                reservation_row=updated,
+                decision="denied",
+                decision_note=note,
+                actor_user=g.current_user,
+            )
+        except Exception:
+            pass
         return jsonify({"ok": True, "reservation": reservation_to_event_payload(updated, g.current_user)})
 
     @bp.get("/api/availability-summary", endpoint="api_availability_summary")

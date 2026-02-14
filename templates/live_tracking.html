@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Live Tracking · {{ app_name }}{% endblock %}
+{% block header_subtitle %}Quick access to {{ live_tracking_tail }} on FlightAware.{% endblock %}
+{% block page_styles %}
+.liveWrap{
+  display:grid;
+  gap:16px;
+  max-width:760px;
+}
+.liveCard{
+  border:1px solid color-mix(in srgb, var(--color-border) 88%, white);
+  background:var(--color-surface);
+  border-radius:16px;
+  box-shadow:var(--color-shadow-soft);
+  padding:18px;
+}
+.liveCard h2{ margin:0 0 10px; }
+.liveMeta{
+  margin:0;
+  color:var(--color-muted);
+  font-size:14px;
+  line-height:1.5;
+}
+.liveActions{
+  margin-top:14px;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.liveTip{
+  margin-top:12px;
+  font-size:12.5px;
+  color:var(--color-muted);
+}
+{% endblock %}
+{% block content %}
+<section class="liveWrap">
+  <article class="liveCard">
+    <h2>{{ live_tracking_tail }} Live Profile</h2>
+    <p class="liveMeta">
+      Live tracking is now handled directly on FlightAware. Use the button below to open the aircraft profile.
+    </p>
+    <div class="liveActions">
+      <a class="btn btnPrimary" href="{{ live_tracking_url }}" target="_blank" rel="noopener">Open on FlightAware</a>
+      <a class="btn" href="/my-flights">Back to My Flights</a>
+    </div>
+    <p class="liveTip">Tip: bookmark the FlightAware page for fastest access.</p>
+  </article>
+</section>
+{% endblock %}
