@@ -124,6 +124,26 @@ def test_admin_settings_get_and_patch(tmp_path, monkeypatch):
     assert any(row["key"] == "pending_reservation_color" and row["new_value"] == "#808080" for row in history_rows)
 
 
+def test_admin_settings_email_toggle_controls_runtime_behavior(tmp_path, monkeypatch):
+    _setup_env(monkeypatch)
+    client = tbm_app.app.test_client()
+    _login(client, "admin@example.com", "adminpass123")
+
+    monkeypatch.setattr(tbm_app, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(tbm_app, "EMAIL_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setattr(tbm_app, "EMAIL_FROM_ADDRESS", "noreply@example.com")
+
+    disabled = client.patch("/api/admin/settings", json={"email_enabled": "false"})
+    assert disabled.status_code == 200
+    assert disabled.get_json()["settings"]["email_enabled"] == "false"
+    assert tbm_app._email_enabled_and_configured() is False
+
+    enabled = client.patch("/api/admin/settings", json={"email_enabled": "true"})
+    assert enabled.status_code == 200
+    assert enabled.get_json()["settings"]["email_enabled"] == "true"
+    assert tbm_app._email_enabled_and_configured() is True
+
+
 def test_admin_settings_dependency_validation(tmp_path, monkeypatch):
     _setup_env(monkeypatch)
     client = tbm_app.app.test_client()

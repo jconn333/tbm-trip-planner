@@ -288,6 +288,7 @@ def _default_runtime_settings() -> dict[str, str]:
         "admin_flights_default_scope": "future_only",
         "user_show_closed_default": "false",
         "pending_reservation_color": DEFAULT_PENDING_RESERVATION_COLOR,
+        "email_enabled": "true" if EMAIL_ENABLED else "false",
     }
 
 
@@ -446,8 +447,13 @@ def _email_subject(text: str) -> str:
     return f"{prefix} {text}"
 
 
+def _effective_email_enabled() -> bool:
+    raw = (_load_runtime_settings().get("email_enabled") or ("true" if EMAIL_ENABLED else "false")).strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def _email_enabled_and_configured() -> bool:
-    if not EMAIL_ENABLED:
+    if not _effective_email_enabled():
         return False
     return bool(EMAIL_SMTP_HOST and EMAIL_FROM_ADDRESS)
 
@@ -3992,6 +3998,7 @@ def api_admin_settings_patch():
         "admin_flights_default_scope",
         "user_show_closed_default",
         "pending_reservation_color",
+        "email_enabled",
     }
     updates: dict[str, str] = {}
     owner_color_owner_ids: set[int] = set()
@@ -4049,6 +4056,11 @@ def api_admin_settings_patch():
             if not normalized:
                 return _json_error("pending_reservation_color must be a hex value like #A1B2C3.", 400, "invalid_setting", key)
             value = normalized
+        elif key == "email_enabled":
+            value = value.lower()
+            if value not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
+                return _json_error("email_enabled must be a boolean-like value.", 400, "invalid_setting", key)
+            value = "true" if value in ("true", "1", "yes", "on") else "false"
         updates[key] = value
 
     if updates:

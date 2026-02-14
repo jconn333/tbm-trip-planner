@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Admin Settings · {{ app_name }}{% endblock %}
-{% block header_subtitle %}Runtime reservation settings (stored in SQLite).{% endblock %}
+{% block header_subtitle %}Runtime reservation and notification settings (stored in SQLite).{% endblock %}
 {% block page_styles %}
 .panel{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);border-radius:16px;padding:12px;max-width:760px}
 .panel + .panel{margin-top:12px}
@@ -48,6 +48,7 @@
     <div class="field"><label for="reservation_max_days">Max Reservation Days</label><input id="reservation_max_days" type="number" min="1" /></div>
     <div class="field"><label for="admin_flights_default_scope">Admin Flights Default Scope</label><select id="admin_flights_default_scope" class="js-custom-select"><option value="future_only">Future Only</option><option value="all">All History</option></select></div>
     <div class="field"><label for="user_show_closed_default">User Show Closed Default</label><select id="user_show_closed_default" class="js-custom-select"><option value="false">False</option><option value="true">True</option></select></div>
+    <div class="field"><label for="email_enabled">Email Notifications Enabled</label><select id="email_enabled" class="js-custom-select"><option value="false">False</option><option value="true">True</option></select></div>
     <div class="field"><label for="pending_reservation_color">Pending Reservation Color</label><input id="pending_reservation_color" type="color" value="#9AA2B4" /></div>
   </div>
   <div class="ownerColorSection">
@@ -67,7 +68,7 @@
 {% block scripts %}
 <script>
 (() => {
-  const fields = ['home_timezone', 'reservation_min_minutes', 'reservation_max_days', 'admin_flights_default_scope', 'user_show_closed_default', 'pending_reservation_color'];
+  const fields = ['home_timezone', 'reservation_min_minutes', 'reservation_max_days', 'admin_flights_default_scope', 'user_show_closed_default', 'email_enabled', 'pending_reservation_color'];
   const msg = document.getElementById('msg');
   const historyList = document.getElementById('historyList');
   const ownerColorsWrap = document.getElementById('ownerColorsWrap');

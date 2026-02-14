@@ -77,6 +77,7 @@ def test_smtp_send_email_success(monkeypatch):
     monkeypatch.setattr(tbm_app, "EMAIL_FROM_NAME", "TBM Test")
     monkeypatch.setattr(tbm_app, "EMAIL_REPLY_TO", "")
     monkeypatch.setattr(tbm_app, "EMAIL_TIMEOUT_SEC", 8)
+    monkeypatch.setattr(tbm_app, "_load_runtime_settings", lambda force=False: {"email_enabled": "true"})
     monkeypatch.setattr(tbm_app.smtplib, "SMTP", FakeSMTP)
 
     ok = tbm_app._smtp_send_email(to_addrs=["owner@example.com"], subject="Test Subject", body_text="hello")
@@ -95,6 +96,7 @@ def test_smtp_send_email_failure_returns_false(monkeypatch):
     monkeypatch.setattr(tbm_app, "EMAIL_SMTP_HOST", "smtp.test.local")
     monkeypatch.setattr(tbm_app, "EMAIL_FROM_ADDRESS", "noreply@test.local")
     monkeypatch.setattr(tbm_app, "EMAIL_SMTP_USE_SSL", False)
+    monkeypatch.setattr(tbm_app, "_load_runtime_settings", lambda force=False: {"email_enabled": "true"})
     monkeypatch.setattr(tbm_app.smtplib, "SMTP", BoomSMTP)
 
     ok = tbm_app._smtp_send_email(to_addrs=["owner@example.com"], subject="Test Subject", body_text="hello")
